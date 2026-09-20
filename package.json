@@ -1,0 +1,11 @@
+{
+  "name": "royal-entry-room",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Voice-room entrances rendered live in WebGL",
+  "scripts": {
+    "dev": "node server.cjs",
+    "start": "node server.cjs",
+    "check": "node --check dist/main.js && node --check server.cjs && node check.mjs"
+  }
+}

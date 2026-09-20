@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#080d30">
+  <meta name="description" content="A royal voice room whose horse rider, winged carriage, superbike and golden dragon entrances are rendered live in WebGL.">
+  <title>Sharma Agency · Royal Entries</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23090d30'/%3E%3Cpath d='M12 21l10 10 10-17 10 17 10-10-5 25H17z' fill='%23efca77'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <svg class="icon-library" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs>
+    <symbol id="i-back" viewBox="0 0 24 24"><path d="m14 6-6 6 6 6M8 12h13"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="6" y="10" width="12" height="10" rx="2"/><path d="M9 10V7a3 3 0 0 1 6 0v3M12 14v2"/></symbol>
+    <symbol id="i-sound" viewBox="0 0 24 24"><path d="m11 5-6 4H2v6h3l6 4zM15 8a6 6 0 0 1 0 8M18 5a10 10 0 0 1 0 14"/></symbol>
+    <symbol id="i-mute" viewBox="0 0 24 24"><path d="m11 5-6 4H2v6h3l6 4zM16 9l6 6m0-6-6 6"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M5 6h14M5 12h14M5 18h14"/></symbol>
+    <symbol id="i-replay" viewBox="0 0 24 24"><path d="M4 10a8 8 0 1 1 1 8M4 4v6h6"/></symbol>
+    <symbol id="i-star" viewBox="0 0 24 24"><path d="m12 3 2.6 5.4 6 .9-4.3 4.2 1 5.9-5.3-2.8-5.3 2.8 1-5.9L3.4 9.3l6-.9z"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><path d="m14 5 5 5M4 20l5-1L21 7l-5-5L4 14z"/></symbol>
+    <symbol id="i-crown" viewBox="0 0 24 24"><path d="m3 7 5 4 4-7 4 7 5-4-2 12H5z"/></symbol>
+  </defs></svg>
+
+  <main class="room" aria-label="Royal entry voice room">
+    <div class="room-atmosphere" aria-hidden="true"></div>
+    <div class="ambient-stars" aria-hidden="true"></div>
+    <header class="room-header">
+      <button class="icon-button back-button" id="reset" aria-label="Reset entry sequence" title="Reset entry sequence"><svg><use href="#i-back"/></svg></button>
+      <div class="room-title"><h1 id="room-name">Sharma Agency</h1><p>Online: 1 <span>›</span></p></div>
+      <button class="icon-button round-button" id="sound" aria-label="Turn entrance sound on" aria-pressed="false" title="Turn sound on"><svg><use href="#i-mute"/></svg></button>
+      <button class="icon-button round-button" id="menu" aria-label="Show entry sequence" aria-expanded="false"><svg><use href="#i-menu"/></svg></button>
+    </header>
+
+    <div class="room-badges">
+      <span class="daily"><span class="trophy">🏆</span> Daily</span>
+      <span class="heart-badge"><span>💗</span> Lv. 1 Heart</span>
+      <button id="edit" class="edit-button"><svg><use href="#i-edit"/></svg> Edit</button>
+    </div>
+
+    <section class="seats" aria-label="Room seats">
+      <div class="seat host-seat"><div class="host-avatar"><svg><use href="#i-crown"/></svg><span>S</span></div><span class="host-name"><i>●</i> SHARMA</span></div>
+      <div class="seat"><div class="seat-circle"><svg><use href="#i-lock"/></svg></div><span>NO.2</span></div>
+      <div class="seat"><div class="seat-circle"><svg><use href="#i-lock"/></svg></div><span>NO.3</span></div>
+      <div class="seat"><div class="seat-circle"><svg><use href="#i-lock"/></svg></div><span>NO.4</span></div>
+      <div class="seat"><div class="seat-circle"><svg><use href="#i-lock"/></svg></div><span>NO.5</span></div>
+      <div class="seat"><div class="seat-circle"><svg><use href="#i-lock"/></svg></div><span>NO.6</span></div>
+      <div class="seat"><div class="seat-circle"><svg><use href="#i-lock"/></svg></div><span>NO.7</span></div>
+      <div class="seat"><div class="seat-circle"><svg><use href="#i-lock"/></svg></div><span>NO.8</span></div>
+    </section>
+
+    <section class="entry-stage" id="entry-stage" aria-label="Entrance animation" aria-hidden="true">
+      <div class="stage-glow"></div>
+      <canvas id="stage3d" aria-hidden="true"></canvas>
+      <video id="entry-video" playsinline muted preload="none" disablepictureinpicture></video>
+      <div id="dragon-scene"><div class="dragon-aura"></div><img id="dragon-image" src="assets/dragon.png" alt="Golden dragon spreading its wings" draggable="false"><div class="dragon-trail"></div></div>
+      <canvas id="particles" aria-hidden="true"></canvas>
+      <div class="entry-nameplate"><span class="plate-star">✦</span><span id="arrival-name">SHARMA</span><span class="plate-heart">♥</span><small>has entered the room</small></div>
+    </section>
+
+    <div class="room-space" aria-hidden="true"><div class="constellation">✧</div></div>
+    <section class="room-message" aria-live="polite" aria-atomic="true"><span class="message-crown"><svg><use href="#i-crown"/></svg></span><div><strong id="message-heading">Welcome to the room</strong><p id="message-detail">Make your royal entrance.</p></div></section>
+
+    <section class="entry-controls" aria-label="Entrance controls">
+      <div class="sequence-label"><span>ENTRANCE SEQUENCE</span><span id="sequence-count">01 / 04</span></div>
+      <ol class="entry-sequence" aria-label="Entry order">
+        <li class="next" data-entry="0"><span class="step-number">01</span><span>Horse rider</span></li>
+        <li data-entry="1"><span class="step-number">02</span><span>Royal rath</span></li>
+        <li data-entry="2"><span class="step-number">03</span><span>Superbike</span></li>
+        <li data-entry="3"><span class="step-number">04</span><span>Dragon</span></li>
+      </ol>
+      <div class="button-row"><button class="enter-button" id="enter"><svg><use href="#i-crown"/></svg><span id="button-label">Enter with horse rider</span><span class="button-spark">✦</span></button><button class="replay-button" id="replay" aria-label="Replay last entrance" title="Replay last entrance" disabled><svg><use href="#i-replay"/></svg></button></div>
+      <p class="control-hint" id="hint">Tap to enter · A new ride with every click</p>
+    </section>
+    <div class="home-indicator" aria-hidden="true"></div>
+
+    <aside class="menu-panel" id="menu-panel" hidden><h2>Your next entrances</h2><p>01 · Horse rider</p><p>02 · Royal rath</p><p>03 · Superbike</p><p>04 · Golden dragon</p><small>The sequence repeats after the dragon.</small><button id="menu-reset">Start from horse rider</button></aside>
+    <dialog id="edit-dialog"><form id="edit-form"><h2>Edit room</h2><label for="name-input">Room name</label><input id="name-input" name="roomName" maxlength="30" value="Sharma Agency" required autocomplete="off"><label for="arrival-input">Entrance name</label><input id="arrival-input" name="arrivalName" maxlength="20" value="SHARMA" required autocomplete="off"><div class="dialog-buttons"><button type="button" id="cancel-edit">Cancel</button><button type="submit">Save</button></div></form></dialog>
+  </main>
+  <script src="main.js" defer></script>
+</body>
+</html>
