@@ -13,12 +13,18 @@
   const video = $('entry-video');
   const steps = [...document.querySelectorAll('.entry-sequence li')];
   let next = 0, last = -1, playing = false, enabledSound = false, run = 0;
-  let finishTimer, loadTimer, particleFrame, audioContext, activeSounds = [];
+  let finishTimer, loadTimer, particleFrame;
   const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
 
   // Entrances are rendered live in WebGL. The filmed reference clips stay on
   // disk purely as a fallback for browsers without a usable WebGL context.
-  let gl = null;
+  let gl = null, sfx = null;
+  import('./entrysfx.js')
+    .then((mod) => {
+      sfx = mod.createSfx();
+      if (enabledSound) sfx.setEnabled(true);
+    })
+    .catch(() => { sfx = null; });
   import('./entry3d.js')
     .then((mod) => {
       gl = mod.createEntryEngine($('stage3d'));
@@ -57,43 +63,13 @@
   }
 
   function stopSounds() {
-    activeSounds.forEach((node) => { try { node.stop(); } catch {} });
-    activeSounds = [];
-  }
-
-  function tone(frequency, start, length, volume, type = 'sine', endFrequency = frequency) {
-    if (!audioContext || !enabledSound) return;
-    const oscillator = audioContext.createOscillator();
-    const gain = audioContext.createGain();
-    oscillator.type = type;
-    oscillator.frequency.setValueAtTime(frequency, start);
-    oscillator.frequency.exponentialRampToValueAtTime(Math.max(20, endFrequency), start + length);
-    gain.gain.setValueAtTime(0, start);
-    gain.gain.linearRampToValueAtTime(volume, start + .02);
-    gain.gain.exponentialRampToValueAtTime(.001, start + length);
-    oscillator.connect(gain).connect(audioContext.destination);
-    oscillator.start(start); oscillator.stop(start + length + .05);
-    activeSounds.push(oscillator);
+    sfx?.stop();
   }
 
   function playSound(index) {
-    if (!enabledSound) return;
-    try {
-      audioContext ||= new (window.AudioContext || window.webkitAudioContext)();
-      audioContext.resume().catch(() => {});
-      stopSounds();
-      const now = audioContext.currentTime + .03;
-      if (index === 0) {
-        for (let i = 0; i < 12; i++) { tone(115, now + i * .28, .11, .045, 'triangle', 45); tone(145, now + i * .28 + .12, .09, .035, 'triangle', 60); }
-      } else if (index === 1) {
-        [523, 659, 784, 1047, 1319, 1568].forEach((f, i) => tone(f, now + i * .25, 1.1, .028));
-      } else if (index === 2) {
-        tone(70, now, 1.6, .038, 'sawtooth', 210); tone(110, now + .3, 1.9, .025, 'triangle', 55);
-      } else {
-        tone(62, now, 4.5, .055, 'triangle', 30);
-        [392, 587, 784, 1175].forEach((f, i) => tone(f, now + .8 + i * .3, 2, .022));
-      }
-    } catch { /* Visual entrance remains available when audio is unsupported. */ }
+    // Hooves, wingbeats, engine and roar are synthesised in entrysfx.js and
+    // scheduled against the audio clock, so they stay in step with the rig.
+    sfx?.play(entries[index].key, entries[index].duration);
   }
 
   function particles(color, duration) {
@@ -158,10 +134,6 @@
     updateControls(index);
     $('message-heading').textContent = `${entry.name} is arriving`;
     $('message-detail').textContent = 'The room is yours.';
-    // Unlock audio while still handling the actual user gesture.
-    if (enabledSound) {
-      try { audioContext ||= new (window.AudioContext || window.webkitAudioContext)(); audioContext.resume().catch(() => {}); } catch {}
-    }
     stage.className = `entry-stage ${entry.key}`;
     video.pause();
     video.onended = null; video.onerror = null;
@@ -233,11 +205,12 @@
   $('menu-reset').addEventListener('click', reset);
   $('sound').addEventListener('click', () => {
     enabledSound = !enabledSound;
+    // The first enable happens inside a click, which is what unlocks audio.
+    sfx?.setEnabled(enabledSound);
     $('sound').setAttribute('aria-pressed', String(enabledSound));
     $('sound').setAttribute('aria-label', `Turn entrance sound ${enabledSound ? 'off' : 'on'}`);
     $('sound').title = `Turn sound ${enabledSound ? 'off' : 'on'}`;
     $('sound').querySelector('use').setAttribute('href', enabledSound ? '#i-sound' : '#i-mute');
-    if (!enabledSound) stopSounds();
   });
   $('menu').addEventListener('click', () => {
     $('menu-panel').hidden = !$('menu-panel').hidden;

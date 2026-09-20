@@ -42,6 +42,75 @@ function canvasTexture(size, draw) {
   return tex;
 }
 
+/**
+ * Tiling texture helper. Surfaces need a repeating detail map, and these are
+ * drawn rather than downloaded so the page still ships no image files.
+ */
+function tileTexture(size, repeat, draw, { srgb = false } = {}) {
+  const c = document.createElement('canvas');
+  c.width = c.height = size;
+  draw(c.getContext('2d'), size);
+  const tex = new THREE.CanvasTexture(c);
+  if (srgb) tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(repeat, repeat);
+  tex.anisotropy = 4;
+  return tex;
+}
+
+/** Sobel-derives a normal map from a greyscale height canvas. */
+function normalFromHeight(size, repeat, drawHeight, strength = 2.2) {
+  const h = document.createElement('canvas');
+  h.width = h.height = size;
+  const hg = h.getContext('2d');
+  drawHeight(hg, size);
+  const src = hg.getImageData(0, 0, size, size).data;
+  const out = hg.createImageData(size, size);
+  const at = (x, y) => src[((y & (size - 1)) * size + (x & (size - 1))) * 4];
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const dx = (at(x + 1, y) - at(x - 1, y)) / 255 * strength;
+      const dy = (at(x, y + 1) - at(x, y - 1)) / 255 * strength;
+      const len = Math.hypot(dx, dy, 1);
+      const i = (y * size + x) * 4;
+      out.data[i] = (-dx / len * 0.5 + 0.5) * 255;
+      out.data[i + 1] = (-dy / len * 0.5 + 0.5) * 255;
+      out.data[i + 2] = (1 / len * 0.5 + 0.5) * 255;
+      out.data[i + 3] = 255;
+    }
+  }
+  const c = document.createElement('canvas');
+  c.width = c.height = size;
+  c.getContext('2d').putImageData(out, 0, 0);
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(repeat, repeat);
+  return tex;
+}
+
+/** Value noise on a canvas — the base for fur, grain and scuffing. */
+function noiseField(g, size, cells, contrast = 1) {
+  const grid = cells + 1;
+  const v = Array.from({ length: grid * grid }, () => Math.random());
+  const img = g.createImageData(size, size);
+  const fade = (t) => t * t * (3 - 2 * t);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const gx = (x / size) * cells, gy = (y / size) * cells;
+      const x0 = Math.floor(gx), y0 = Math.floor(gy);
+      const tx = fade(gx - x0), ty = fade(gy - y0);
+      const a = v[y0 * grid + x0], b = v[y0 * grid + x0 + 1];
+      const c = v[(y0 + 1) * grid + x0], d = v[(y0 + 1) * grid + x0 + 1];
+      let n = lerp(lerp(a, b, tx), lerp(c, d, tx), ty);
+      n = clamp((n - 0.5) * contrast + 0.5, 0, 1);
+      const i = (y * size + x) * 4, p = n * 255;
+      img.data[i] = img.data[i + 1] = img.data[i + 2] = p;
+      img.data[i + 3] = 255;
+    }
+  }
+  g.putImageData(img, 0, 0);
+}
+
 const TEX = {};
 function buildTextures() {
   // Soft additive dot — particles, sparks, glow billboards.
@@ -84,6 +153,92 @@ function buildTextures() {
     g.fillStyle = fade;
     g.fillRect(0, 0, s, s);
   });
+  // ---- Surface detail. These are what stop the rigs reading as toy plastic:
+  // a hair grain on the coats, brushing and scuffs on the metal, overlapping
+  // scales on the dragon, and a weave on the cloth.
+  const hair = (g, s) => {
+    g.fillStyle = '#9a9a9a';
+    g.fillRect(0, 0, s, s);
+    for (let i = 0; i < s * 8; i++) {
+      const x = Math.random() * s, y = Math.random() * s;
+      const len = 9 + Math.random() * 22;
+      const tone = 120 + Math.random() * 120;
+      g.strokeStyle = `rgb(${tone},${tone},${tone})`;
+      g.lineWidth = 0.5 + Math.random() * 0.9;
+      g.beginPath();
+      g.moveTo(x, y);
+      g.quadraticCurveTo(x + len * 0.1, y + len * 0.5, x + len * 0.26, y + len);
+      g.stroke();
+    }
+  };
+  TEX.furRough = tileTexture(256, 3, hair);
+  TEX.furNormal = normalFromHeight(256, 3, hair, 1.1);
+
+  const brushed = (g, s) => {
+    g.fillStyle = '#b4b4b4';
+    g.fillRect(0, 0, s, s);
+    for (let i = 0; i < s * 6; i++) {
+      const y = Math.random() * s;
+      const tone = 130 + Math.random() * 110;
+      g.strokeStyle = `rgba(${tone},${tone},${tone},0.4)`;
+      g.lineWidth = 0.4 + Math.random() * 0.8;
+      g.beginPath();
+      g.moveTo(Math.random() * s - s * 0.3, y);
+      g.lineTo(Math.random() * s + s * 0.3, y + (Math.random() - 0.5) * 5);
+      g.stroke();
+    }
+    for (let i = 0; i < 22; i++) {                       // scuffs and dings
+      g.strokeStyle = `rgba(${80 + Math.random() * 70},${80 + Math.random() * 70},${105},0.35)`;
+      g.lineWidth = 0.6 + Math.random() * 1.3;
+      const x = Math.random() * s, y = Math.random() * s;
+      g.beginPath();
+      g.moveTo(x, y);
+      g.lineTo(x + (Math.random() - 0.5) * 40, y + (Math.random() - 0.5) * 22);
+      g.stroke();
+    }
+  };
+  TEX.metalRough = tileTexture(256, 2.5, brushed);
+  TEX.metalNormal = normalFromHeight(256, 2.5, brushed, 0.45);
+
+  const scales = (g, s) => {
+    g.fillStyle = '#8c8c8c';
+    g.fillRect(0, 0, s, s);
+    const rows = 9, r = s / rows;
+    for (let row = -1; row <= rows; row++) {
+      for (let col = -1; col <= rows; col++) {
+        const cx = col * r + (row % 2 ? r / 2 : 0);
+        const cy = row * r * 0.72;
+        const grad = g.createRadialGradient(cx, cy - r * 0.2, r * 0.1, cx, cy, r * 0.78);
+        grad.addColorStop(0, '#e2e2e2');
+        grad.addColorStop(0.72, '#a6a6a6');
+        grad.addColorStop(1, '#6a6a6a');
+        g.fillStyle = grad;
+        g.beginPath();
+        g.ellipse(cx, cy, r * 0.62, r * 0.55, 0, 0, Math.PI * 2);
+        g.fill();
+      }
+    }
+  };
+  TEX.scaleRough = tileTexture(256, 3.2, scales);
+  TEX.scaleNormal = normalFromHeight(256, 3.2, scales, 1.5);
+
+  const weave = (g, s) => {
+    noiseField(g, s, 26, 0.7);
+    g.globalAlpha = 0.35;
+    for (let i = 0; i < s; i += 6) {
+      g.fillStyle = i % 12 ? '#dadada' : '#909090';
+      g.fillRect(i, 0, 3, s);
+      g.fillRect(0, i, s, 3);
+    }
+    g.globalAlpha = 1;
+  };
+  TEX.clothRough = tileTexture(256, 2, weave);
+  TEX.clothNormal = normalFromHeight(256, 2, weave, 1.6);
+
+  const grain = (g, s) => noiseField(g, s, 28, 1.3);
+  TEX.grainRough = tileTexture(256, 3, grain);
+  TEX.grainNormal = normalFromHeight(256, 3, grain, 0.8);
+
   // Six-point star flare for the hero sparkle.
   TEX.star = canvasTexture(128, (g, s) => {
     const r = s / 2;
@@ -112,24 +267,32 @@ function buildTextures() {
 const MAT = {};
 function buildMaterials() {
   const std = (o) => new THREE.MeshStandardMaterial(o);
-  MAT.gold = std({ color: 0xf0b444, metalness: 1, roughness: 0.19, emissive: 0x190d00, envMapIntensity: 1.5 });
-  MAT.goldDeep = std({ color: 0xd08c2a, metalness: 1, roughness: 0.3, emissive: 0x1d0e00, envMapIntensity: 1.7 });
-  MAT.silver = std({ color: 0xc8d2e8, metalness: 1, roughness: 0.2, envMapIntensity: 1.5 });
-  MAT.steel = std({ color: 0x7c88a4, metalness: 1, roughness: 0.34, envMapIntensity: 1.2 });
-  MAT.dark = std({ color: 0x1b2038, metalness: 0.75, roughness: 0.45, envMapIntensity: 1.1 });
-  MAT.coat = std({ color: 0xcfc6b6, metalness: 0.05, roughness: 0.66, envMapIntensity: 0.45 });
-  MAT.coatWarm = std({ color: 0x5d3418, metalness: 0.1, roughness: 0.6, envMapIntensity: 0.7 });
-  MAT.hoof = std({ color: 0x2a2233, metalness: 0.4, roughness: 0.5 });
-  MAT.mane = std({ color: 0x2c1d14, metalness: 0.2, roughness: 0.45, emissive: 0x160c04, envMapIntensity: 1.1 });
+  // Detail maps per family. A roughness map alone does most of the work:
+  // it breaks the single uniform highlight that makes CG surfaces look like
+  // moulded plastic. The matching normal map adds the grain under it.
+  const fur = () => ({ roughnessMap: TEX.furRough, normalMap: TEX.furNormal, normalScale: new THREE.Vector2(0.45, 0.45) });
+  const metal = () => ({ roughnessMap: TEX.metalRough, normalMap: TEX.metalNormal, normalScale: new THREE.Vector2(0.25, 0.25) });
+  const scaled = () => ({ roughnessMap: TEX.scaleRough, normalMap: TEX.scaleNormal, normalScale: new THREE.Vector2(0.7, 0.7) });
+  const cloth = () => ({ roughnessMap: TEX.clothRough, normalMap: TEX.clothNormal, normalScale: new THREE.Vector2(0.5, 0.5) });
+  const grain = () => ({ roughnessMap: TEX.grainRough, normalMap: TEX.grainNormal, normalScale: new THREE.Vector2(0.45, 0.45) });
+  MAT.gold = std({ color: 0xf0b444, metalness: 1, roughness: 0.3, emissive: 0x190d00, envMapIntensity: 1.5, ...metal() });
+  MAT.goldDeep = std({ color: 0xd08c2a, metalness: 1, roughness: 0.44, emissive: 0x1d0e00, envMapIntensity: 1.7, ...metal() });
+  MAT.silver = std({ color: 0xc8d2e8, metalness: 1, roughness: 0.32, envMapIntensity: 1.5, ...metal() });
+  MAT.steel = std({ color: 0x7c88a4, metalness: 1, roughness: 0.48, envMapIntensity: 1.2, ...metal() });
+  MAT.dark = std({ color: 0x1b2038, metalness: 0.7, roughness: 0.6, envMapIntensity: 1.1, ...grain() });
+  MAT.coat = std({ color: 0xcfc6b6, metalness: 0.04, roughness: 0.74, envMapIntensity: 0.6, ...fur() });
+  MAT.coatWarm = std({ color: 0x5d3418, metalness: 0.08, roughness: 0.72, envMapIntensity: 0.85, ...fur() });
+  MAT.hoof = std({ color: 0x2a2233, metalness: 0.35, roughness: 0.62, ...grain() });
+  MAT.mane = std({ color: 0x2c1d14, metalness: 0.15, roughness: 0.66, emissive: 0x160c04, envMapIntensity: 1.1, ...fur() });
   MAT.glass = std({ color: 0x1d7d76, metalness: 0.2, roughness: 0.08, emissive: 0x0d5750, emissiveIntensity: 1.5, transparent: true, opacity: 0.86 });
-  MAT.crimson = std({ color: 0xb3223f, metalness: 0.35, roughness: 0.45, emissive: 0x2c0208 });
-  MAT.violet = std({ color: 0x6f57cf, metalness: 0.65, roughness: 0.32, emissive: 0x160a30, envMapIntensity: 1.2 });
-  MAT.scale = std({ color: 0xf0a733, metalness: 1, roughness: 0.28, emissive: 0x261000, envMapIntensity: 1.5 });
-  MAT.scaleDark = std({ color: 0xa8641a, metalness: 1, roughness: 0.38, emissive: 0x220e00, envMapIntensity: 1.7 });
-  MAT.membrane = std({ color: 0xe8933a, metalness: 0.3, roughness: 0.5, emissive: 0x4a2202, emissiveIntensity: 0.9, transparent: true, opacity: 0.93, side: THREE.DoubleSide });
-  MAT.feather = std({ color: 0xded5c6, metalness: 0.1, roughness: 0.55, emissive: 0x15120c, side: THREE.DoubleSide, envMapIntensity: 0.5 });
-  MAT.neon = std({ color: 0x3a2f9c, metalness: 0.88, roughness: 0.26, emissive: 0x1c1160, emissiveIntensity: 0.8, envMapIntensity: 1.5 });
-  MAT.tyre = std({ color: 0x15161f, metalness: 0.25, roughness: 0.78 });
+  MAT.crimson = std({ color: 0xb3223f, metalness: 0.3, roughness: 0.66, emissive: 0x2c0208, ...cloth() });
+  MAT.violet = std({ color: 0x6f57cf, metalness: 0.68, roughness: 0.46, emissive: 0x160a30, envMapIntensity: 1.2, ...metal() });
+  MAT.scale = std({ color: 0xf0a733, metalness: 1, roughness: 0.42, emissive: 0x261000, envMapIntensity: 1.5, ...scaled() });
+  MAT.scaleDark = std({ color: 0xa8641a, metalness: 1, roughness: 0.55, emissive: 0x220e00, envMapIntensity: 1.7, ...scaled() });
+  MAT.membrane = std({ color: 0xe8933a, metalness: 0.28, roughness: 0.68, emissive: 0x4a2202, emissiveIntensity: 0.9, transparent: true, opacity: 0.93, side: THREE.DoubleSide, ...grain() });
+  MAT.feather = std({ color: 0xded5c6, metalness: 0.08, roughness: 0.82, emissive: 0x15120c, side: THREE.DoubleSide, envMapIntensity: 0.5, ...fur() });
+  MAT.neon = std({ color: 0x3a2f9c, metalness: 0.88, roughness: 0.34, emissive: 0x1c1160, emissiveIntensity: 0.8, envMapIntensity: 1.5, ...metal() });
+  MAT.tyre = std({ color: 0x15161f, metalness: 0.2, roughness: 0.95, ...grain() });
   MAT.amber = std({ color: 0xffe9a8, metalness: 0, roughness: 1, emissive: 0xffb02e, emissiveIntensity: 3.4 });
   MAT.rose = std({ color: 0xffd0e4, metalness: 0, roughness: 1, emissive: 0xff3c86, emissiveIntensity: 3 });
   MAT.cyan = std({ color: 0xd6f7ff, metalness: 0, roughness: 1, emissive: 0x27d9ff, emissiveIntensity: 3.2 });
@@ -1215,6 +1378,11 @@ export function createEntryEngine(canvas, opts = {}) {
 
   renderer.setPixelRatio(dpr);
   renderer.setClearAlpha(0);
+  // Self-shadowing is the other half of the anti-plastic work: legs shadowing
+  // the barrel, a wing shadowing the neck. Dropped on low-core devices.
+  const shadows = !lowPower;
+  renderer.shadowMap.enabled = shadows;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 0.78;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -1232,6 +1400,18 @@ export function createEntryEngine(canvas, opts = {}) {
   const key = new THREE.DirectionalLight(0xfff0d0, 1.55);
   key.position.set(-4, 5, 6);
   scene.add(key);
+  scene.add(key.target);
+  if (shadows) {
+    key.castShadow = true;
+    key.shadow.mapSize.set(1024, 1024);
+    key.shadow.radius = 3;
+    key.shadow.bias = -0.0012;
+    key.shadow.normalBias = 0.022;
+    const sc = key.shadow.camera;
+    sc.left = -3.6; sc.right = 3.6; sc.top = 3.2; sc.bottom = -3.2;
+    sc.near = 0.5; sc.far = 26;
+    sc.updateProjectionMatrix();
+  }
   const rim = new THREE.DirectionalLight(0x8fb4ff, 1.25);
   rim.position.set(6, 2.5, -5);
   scene.add(rim);
@@ -1248,6 +1428,7 @@ export function createEntryEngine(canvas, opts = {}) {
 
   const pool = mesh(new THREE.PlaneGeometry(7.2, 3.4), additive(0xc79bff, 0.5, TEX.pool), 0, -1.86, 1.0);
   pool.rotation.x = -1.16;
+  pool.renderOrder = 1;
   stage.add(pool);
 
   const podium = mesh(new THREE.PlaneGeometry(6, 1.1), additive(0xffffff, 0.22, TEX.shaft), 0, -1.72, 1.4);
@@ -1280,6 +1461,15 @@ export function createEntryEngine(canvas, opts = {}) {
   const flare = mesh(new THREE.PlaneGeometry(3.2, 3.2), additive(0xfff3d2, 0, TEX.star), 0, 0, -3);
   stage.add(flare);
 
+  // A soft dark ellipse on the floor. Without it the rides look pasted on top
+  // of the room rather than standing in it.
+  const contact = mesh(new THREE.PlaneGeometry(4.6, 2.2), new THREE.MeshBasicMaterial({
+    map: TEX.pool, color: 0x05030f, transparent: true, opacity: 0, depthWrite: false, toneMapped: false
+  }), 0, -1.84, 0.9);
+  contact.rotation.x = -1.16;
+  contact.renderOrder = 4;
+  stage.add(contact);
+
   // --- Post ---------------------------------------------------------
   const composer = new EffectComposer(renderer);
   composer.addPass(new RenderPass(scene, camera));
@@ -1298,6 +1488,14 @@ export function createEntryEngine(canvas, opts = {}) {
     const rig = cfg.build();
     rig.root.visible = false;
     rig.root.scale.setScalar(cfg.scale);
+    if (shadows) {
+      rig.root.traverse((o) => {
+        // Glows, beams and trails are additive helpers, not solid geometry.
+        if (!o.isMesh || o.material.blending === THREE.AdditiveBlending) return;
+        o.castShadow = true;
+        o.receiveShadow = true;
+      });
+    }
     const pivot = new THREE.Group();
     pivot.add(rig.root);
     holder.add(pivot);
@@ -1380,6 +1578,16 @@ export function createEntryEngine(canvas, opts = {}) {
     e.trail.mesh.visible = vis > 0.02;
 
     // Lighting and stage react to where the ride is.
+    if (shadows) {
+      key.position.set(p.x - 3.4, 5, p.z + 5);
+      key.target.position.set(p.x, e.cfg.y + p.y, p.z);
+      key.target.updateMatrixWorld();
+    }
+    // Contact shadow fades and spreads with height off the floor.
+    const lift = clamp((e.cfg.y + p.y + 1.7) / 2.6, 0, 1);
+    contact.position.x = p.x;
+    contact.material.opacity = vis * 0.7 * (1 - lift * 0.72);
+    contact.scale.setScalar(1 + lift * 0.7);
     hero.position.set(p.x, e.cfg.y + p.y + 0.6, p.z + 2.2);
     hero.intensity = vis * 4;
     hero.color.setHex(e.cfg.accent);

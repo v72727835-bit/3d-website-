@@ -33,6 +33,29 @@ metal, with a bloom pass, a path-derived comet trail, drifting sparks and a
 camera that eases in for the centre beat. The room UI around the stage is HTML
 and CSS.
 
+Surfaces carry drawn detail maps — a hair grain on the coats, brushing and
+scuffs on the metal, overlapping scales on the dragon — because a single
+uniform highlight is what makes a rendered surface look like moulded plastic.
+The maps are painted to a canvas at load and their normal maps are derived from
+them, so the page still ships no image files. A shadow-mapped key light follows
+the ride for self-shadowing, and a soft contact shadow keeps it standing in the
+room rather than pasted over it.
+
+## Sound
+
+`dist/entrysfx.js` synthesises the entrance audio — no sound files either.
+Hooves are a noise crack over a pitched thud, struck on a gallop rhythm that
+matches the leg cycle; the coach adds iron-rim rumble and harness bells; the
+bike is two detuned sawtooths through a moving lowpass with gear shifts,
+turbo whistle and exhaust pops; the dragon is a formant-filtered roar over a
+sub, with wingbeats on the rig's flap rate and fire on the centre hold.
+
+Every voice for an entrance is scheduled up front against the audio clock, so
+the sound holds its timing even if the frame rate dips and nothing runs per
+frame. The mix pans right to left with the ride and passes through a small
+generated reverb, into a limiter. Sound is off by default and the toggle
+unlocks the audio context from the click, as browsers require.
+
 The clips in `dist/assets/` are kept only as a fallback: if the browser cannot
 give the page a WebGL context, `main.js` drops the `gl` class and the previous
 video and CSS entrances play instead.
