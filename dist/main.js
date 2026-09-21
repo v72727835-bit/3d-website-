@@ -25,13 +25,13 @@
       if (enabledSound) sfx.setEnabled(true);
     })
     .catch(() => { sfx = null; });
-  import('./entry3d.js')
-    .then((mod) => {
+  const engineReady = import('./entry3d.js')
+    .then(async (mod) => {
       gl = mod.createEntryEngine($('stage3d'));
       if (!gl) throw new Error('no webgl');
       room.classList.add('gl');
       gl.resize();
-      entries.forEach((e) => gl.prepare(e.key));
+      await Promise.all(entries.map((e) => gl.prepare(e.key)));
       window.addEventListener('resize', () => gl.resize(), { passive: true });
     })
     .catch(() => {
@@ -132,6 +132,8 @@
     $('menu-panel').hidden = true;
     $('menu').setAttribute('aria-expanded', 'false');
     updateControls(index);
+    await engineReady;
+    if (token !== run) return;
     $('message-heading').textContent = `${entry.name} is arriving`;
     $('message-detail').textContent = 'The room is yours.';
     stage.className = `entry-stage ${entry.key}`;

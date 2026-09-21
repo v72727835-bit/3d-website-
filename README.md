@@ -56,6 +56,10 @@ frame. The mix pans right to left with the ride and passes through a small
 generated reverb, into a limiter. Sound is off by default and the toggle
 unlocks the audio context from the click, as browsers require.
 
+The animated horse base is the CC0 “Horse” model by Quaternius from Poly Pizza
+(https://poly.pizza/m/qvTrSG9pZF). It is public domain and permitted for
+commercial use; the page supplies its own materials, knight, wings and staging.
+
 The clips in `dist/assets/` are kept only as a fallback: if the browser cannot
 give the page a WebGL context, `main.js` drops the `gl` class and the previous
 video and CSS entrances play instead.

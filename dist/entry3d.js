@@ -17,6 +17,14 @@ import { EffectComposer } from './vendor/three/postprocessing/EffectComposer.js'
 import { RenderPass } from './vendor/three/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from './vendor/three/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from './vendor/three/postprocessing/OutputPass.js';
+import { GLTFLoader } from './vendor/three/loaders/GLTFLoader.js';
+
+// The anatomical morph-target mesh supplies the actual gallop. Armour,
+// carriage, wings and lighting remain live Three.js geometry.
+function horseAsset() {
+  // A fresh parse gives each skinned horse an independent skeleton/mixer.
+  return new GLTFLoader().loadAsync('assets/models/horse-anatomy.glb');
+}
 
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const lerp = (a, b, t) => a + (b - a) * t;
@@ -277,11 +285,13 @@ function buildMaterials() {
   const grain = () => ({ roughnessMap: TEX.grainRough, normalMap: TEX.grainNormal, normalScale: new THREE.Vector2(0.45, 0.45) });
   MAT.gold = std({ color: 0xf0b444, metalness: 1, roughness: 0.3, emissive: 0x190d00, envMapIntensity: 1.5, ...metal() });
   MAT.goldDeep = std({ color: 0xd08c2a, metalness: 1, roughness: 0.44, emissive: 0x1d0e00, envMapIntensity: 1.7, ...metal() });
+  MAT.coachIvory = new THREE.MeshPhysicalMaterial({ color: 0xffedc6, metalness: 0.12, roughness: 0.3, clearcoat: 0.88, clearcoatRoughness: 0.2, envMapIntensity: 1.15 });
+  MAT.coachGold = new THREE.MeshPhysicalMaterial({ color: 0xc99335, metalness: 0.92, roughness: 0.3, clearcoat: 0.5, clearcoatRoughness: 0.2, envMapIntensity: 1.5 });
   MAT.silver = std({ color: 0xc8d2e8, metalness: 1, roughness: 0.32, envMapIntensity: 1.5, ...metal() });
   MAT.steel = std({ color: 0x7c88a4, metalness: 1, roughness: 0.48, envMapIntensity: 1.2, ...metal() });
   MAT.dark = std({ color: 0x1b2038, metalness: 0.7, roughness: 0.6, envMapIntensity: 1.1, ...grain() });
-  MAT.coat = std({ color: 0xcfc6b6, metalness: 0.04, roughness: 0.74, envMapIntensity: 0.6, ...fur() });
-  MAT.coatWarm = std({ color: 0x5d3418, metalness: 0.08, roughness: 0.72, envMapIntensity: 0.85, ...fur() });
+  MAT.coat = std({ color: 0xfff9ec, metalness: 0.03, roughness: 0.57, envMapIntensity: 0.85, ...fur() });
+  MAT.coatWarm = std({ color: 0x6b3019, metalness: 0.04, roughness: 0.51, envMapIntensity: 1.05, ...fur() });
   MAT.hoof = std({ color: 0x2a2233, metalness: 0.35, roughness: 0.62, ...grain() });
   MAT.mane = std({ color: 0x2c1d14, metalness: 0.15, roughness: 0.66, emissive: 0x160c04, envMapIntensity: 1.1, ...fur() });
   MAT.glass = std({ color: 0x1d7d76, metalness: 0.2, roughness: 0.08, emissive: 0x0d5750, emissiveIntensity: 1.5, transparent: true, opacity: 0.86 });
@@ -481,12 +491,12 @@ function buildRider({ armour = MAT.steel, cloth = MAT.crimson, lean = 0 } = {}) 
   const torso = group();
   r.add(torso);
   torso.rotation.z = lean;
-  torso.add(mesh(new THREE.CapsuleGeometry(0.2, 0.42, 4, 12), armour, 0, 0.24, 0));
-  const chest = mesh(new THREE.SphereGeometry(0.235, 16, 12), armour, -0.01, 0.34, 0);
-  chest.scale.set(1.12, 0.95, 1.02);
+  torso.add(mesh(new THREE.CapsuleGeometry(0.225, 0.44, 6, 18), armour, 0, 0.24, 0));
+  const chest = mesh(new THREE.SphereGeometry(0.255, 24, 18), armour, -0.01, 0.35, 0);
+  chest.scale.set(1.2, 0.98, 1.08);
   torso.add(chest);
   const pauldrons = pair((side) => {
-    const p = mesh(new THREE.SphereGeometry(0.13, 12, 10, 0, Math.PI * 2, 0, Math.PI * 0.6), MAT.gold, 0, 0.46, side * 0.21);
+    const p = mesh(new THREE.SphereGeometry(0.155, 18, 14, 0, Math.PI * 2, 0, Math.PI * 0.62), armour, 0, 0.47, side * 0.245);
     p.rotation.z = -side * 0.1;
     torso.add(p);
     return p;
@@ -501,37 +511,62 @@ function buildRider({ armour = MAT.steel, cloth = MAT.crimson, lean = 0 } = {}) 
   // Head + plumed helm
   const neck = group(0, 0.52, 0);
   torso.add(neck);
-  neck.add(mesh(new THREE.SphereGeometry(0.135, 14, 12), MAT.coatWarm, 0, 0.1, 0));
-  const helm = mesh(new THREE.SphereGeometry(0.16, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.62), armour, 0, 0.13, 0);
+  neck.add(mesh(new THREE.CylinderGeometry(0.13, 0.12, 0.21, 16), armour, 0, 0.1, 0));
+  const helm = mesh(new THREE.SphereGeometry(0.16, 24, 18, 0, Math.PI * 2, 0, Math.PI * 0.62), armour, 0, 0.16, 0);
   neck.add(helm);
-  neck.add(mesh(new THREE.ConeGeometry(0.05, 0.3, 8), cloth, 0.02, 0.34, 0));
+  const visor = mesh(new THREE.BoxGeometry(0.018, 0.031, 0.235), MAT.dark, -0.135, 0.17, 0);
+  neck.add(visor);
+  neck.add(mesh(new THREE.BoxGeometry(0.035, 0.18, 0.027), MAT.silver, -0.149, 0.1, 0));
+  // Raised breastplate seams, gauntlets and overlapping waist armour.
+  for (let i = 0; i < 4; i++) {
+    const lamella = mesh(new THREE.TorusGeometry(.18 + i * .005, .024, 8, 24, Math.PI * 1.65), armour, 0, .11 - i * .056, 0);
+    lamella.rotation.x = Math.PI / 2;
+    torso.add(lamella);
+  }
+  torso.add(mesh(new THREE.BoxGeometry(.03, .3, .025), MAT.silver, -.235, .32, 0));
+  const belt = mesh(new THREE.TorusGeometry(.205, .035, 10, 28), MAT.dark, 0, .02, 0);
+  belt.rotation.x = Math.PI / 2;
+  belt.scale.z = .76;
+  torso.add(belt);
+  for (const side of [-1, 1]) {
+    const tasset = mesh(new THREE.BoxGeometry(.24, .34, .045), armour, .02, -.19, side * .13);
+    tasset.rotation.z = side * .05;
+    torso.add(tasset);
+  }
   // Arms — the outer one is raised, matching the salute in the reference.
   const arms = pair((side) => {
     const shoulder = group(0, 0.42, side * 0.21);
-    const upper = mesh(new THREE.CapsuleGeometry(0.068, 0.3, 3, 8), armour, 0, -0.17, 0);
+    const upper = mesh(new THREE.CapsuleGeometry(0.082, 0.3, 5, 12), armour, 0, -0.17, 0);
     shoulder.add(upper);
     const elbow = group(0, -0.34, 0);
     shoulder.add(elbow);
-    elbow.add(mesh(new THREE.CapsuleGeometry(0.058, 0.28, 3, 8), armour, 0, -0.16, 0));
+    elbow.add(mesh(new THREE.CapsuleGeometry(0.067, 0.28, 5, 12), armour, 0, -0.16, 0));
+    elbow.add(mesh(new THREE.SphereGeometry(.075, 12, 10), armour, 0, -.31, 0));
     torso.add(shoulder);
     return { shoulder, elbow, side };
   });
-  // Raised banner in the near hand.
+  // Upright silver sword, as in the reference (the bike hides this group).
   const banner = group(0, -0.28, 0);
-  banner.add(mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.95, 8), MAT.gold, 0, 0.38, 0));
-  banner.add(mesh(new THREE.ConeGeometry(0.035, 0.14, 7), MAT.gold, 0, 0.92, 0));
+  banner.rotation.z = 2.63;
+  banner.add(mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.19, 10), MAT.dark, 0, .03, 0));
+  banner.add(mesh(new THREE.BoxGeometry(.28, .035, .04), MAT.gold, 0, .14, 0));
+  const blade = mesh(new THREE.BoxGeometry(.058, .94, .017), MAT.silver, 0, .63, 0);
+  banner.add(blade);
+  banner.add(mesh(new THREE.ConeGeometry(.034, .18, 4), MAT.silver, 0, 1.19, 0));
+  banner.add(mesh(new THREE.SphereGeometry(.035, 10, 8), MAT.gold, 0, -.085, 0));
   const flagGeo = new THREE.PlaneGeometry(0.34, 0.22, 8, 3);
   const flag = mesh(flagGeo, new THREE.MeshStandardMaterial({ color: 0xc8203f, emissive: 0x38040d, roughness: 0.55, metalness: 0.2, side: THREE.DoubleSide }), -0.18, 0.7, 0);
   banner.add(flag);
+  flag.visible = false;
   arms[0].elbow.add(banner);
   // Legs
   const legs = pair((side) => {
     const hip = group(0, 0.02, side * 0.14);
-    hip.add(mesh(new THREE.CapsuleGeometry(0.085, 0.3, 3, 8), MAT.dark, 0, -0.18, 0));
+    hip.add(mesh(new THREE.CapsuleGeometry(0.1, 0.31, 5, 12), armour, 0, -0.18, 0));
     const knee = group(0, -0.36, 0);
     hip.add(knee);
-    knee.add(mesh(new THREE.CapsuleGeometry(0.07, 0.28, 3, 8), MAT.dark, 0, -0.16, 0));
-    knee.add(mesh(new THREE.BoxGeometry(0.22, 0.09, 0.12), MAT.dark, -0.05, -0.33, 0));
+    knee.add(mesh(new THREE.CapsuleGeometry(0.082, 0.29, 5, 12), armour, 0, -0.16, 0));
+    knee.add(mesh(new THREE.BoxGeometry(0.25, 0.11, 0.15), MAT.dark, -0.06, -0.34, 0));
     torso.add(hip);
     return { hip, knee };
   });
@@ -631,9 +666,9 @@ function buildHorse({ coat = MAT.coat, winged = false, rider = true, scale = 1 }
     man = buildRider({ lean: -0.1 });
     man.root.position.set(0.02, 0.5, 0);
     body.add(man.root);
-    man.arms[0].shoulder.rotation.z = 2.3;
-    man.arms[0].shoulder.rotation.x = -0.35;
-    man.arms[0].elbow.rotation.z = -0.5;
+    man.arms[0].shoulder.rotation.z = -2.8;
+    man.arms[0].shoulder.rotation.x = -0.15;
+    man.arms[0].elbow.rotation.z = 0.25;
     man.arms[1].shoulder.rotation.z = -0.9;
     man.arms[1].elbow.rotation.z = -0.7;
     man.legs.forEach((l) => { l.hip.rotation.z = -0.95; l.knee.rotation.z = 0.85; });
@@ -641,9 +676,65 @@ function buildHorse({ coat = MAT.coat, winged = false, rider = true, scale = 1 }
 
   root.scale.setScalar(scale);
 
+  let morphMixer = null, previousTime = 0;
+  const ready = horseAsset().then((asset) => {
+    const anatomy = asset.scene;
+    anatomy.rotation.y = -Math.PI / 2;
+    const box = new THREE.Box3().setFromObject(anatomy);
+    const size = box.getSize(new THREE.Vector3());
+    const center = box.getCenter(new THREE.Vector3());
+    // Normalise against the animal's longest horizontal axis. Some GLBs face
+    // +X and others +Z; using only X can make a rotated horse enormous.
+    const factor = 3.5 / Math.max(size.x, size.z);
+    const anatomyScale = factor;
+    anatomy.scale.setScalar(anatomyScale);
+    anatomy.position.set(-center.x * anatomyScale, -1.18 - box.min.y * anatomyScale, 0);
+    anatomy.traverse((part) => {
+      if (!part.isMesh) return;
+      part.geometry = part.geometry.clone();
+      const positions = part.geometry.attributes.position;
+      const colors = new Float32Array(positions.count * 3);
+      for (let i = 0; i < positions.count; i++) {
+        const x = positions.getX(i), y = positions.getY(i), z = positions.getZ(i);
+        const hoof = 1 - smooth(clamp((y - 18) / 15, 0, 1));
+        const mane = Math.abs(x) < 6 && y > 132 && z > 15 ? .75 : 0;
+        const tail = z < -110 && y > 45 ? .82 : 0;
+        const shade = 1 - Math.max(hoof * .75, mane, tail) * (winged ? .2 : 1);
+        colors.set([shade, shade, shade], i * 3);
+      }
+      part.geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+      part.material = coat.clone();
+      part.material.vertexColors = true;
+      part.material.normalScale.setScalar(.16);
+      part.castShadow = part.receiveShadow = true;
+    });
+    body.children.forEach((part) => {
+      if (part !== man?.root && !wings?.some((w) => w.root === part)) part.visible = false;
+    });
+    root.add(anatomy);
+    if (man) {
+      man.root.position.set(-.08, .30, 0);
+      man.root.scale.setScalar(1.08);
+      const saddle = mesh(new THREE.SphereGeometry(.32, 20, 12), MAT.dark, -.1, .18, 0);
+      saddle.scale.set(1.05, .24, .94);
+      body.add(saddle);
+    }
+    if (asset.animations.length) {
+      morphMixer = new THREE.AnimationMixer(anatomy);
+      const gallop = THREE.AnimationClip.findByName(asset.animations, 'Gallop') || asset.animations.find((clip) => /gallop$/i.test(clip.name)) || asset.animations[0];
+      morphMixer.clipAction(gallop).setDuration(.72).play();
+    }
+    return true;
+  }).catch(() => false);
+
   return {
-    root, body, head, neck, wings, rider: man,
+    root, body, head, neck, wings, rider: man, ready,
     update(t, u, ctx = {}) {
+      if (morphMixer) {
+        if (t < previousTime) morphMixer.setTime(0);
+        morphMixer.update(Math.min(Math.max(t - previousTime, 0), .075));
+        previousTime = t;
+      }
       const speed = ctx.speed ?? 9.5;
       const gait = t * speed;
       legs.forEach(({ leg, phase }) => galloped(leg, gait, phase, ctx.gait ?? 1));
@@ -673,7 +764,7 @@ function buildHorse({ coat = MAT.coat, winged = false, rider = true, scale = 1 }
         man.torso.rotation.z = -0.1 + Math.sin(gait * 2 + 0.3) * 0.07;
         man.torso.position.y = Math.sin(gait * 2) * 0.04;
         man.neck.rotation.z = Math.sin(gait * 2 + 1) * 0.05;
-        man.arms[0].shoulder.rotation.z = 2.3 + Math.sin(gait * 1.4) * 0.14;
+        man.arms[0].shoulder.rotation.z = -2.8 + Math.sin(gait * 1.4) * 0.04;
         man.cape.rotation.z = -0.5 - Math.sin(gait * 1.3) * 0.25;
         man.cape.rotation.y = Math.sin(gait * 1.1) * 0.2;
         const pos = man.flagGeo.attributes.position;
@@ -723,7 +814,7 @@ function buildCarriage() {
   profile.closePath();
   const cabin = mesh(new THREE.ExtrudeGeometry(profile, {
     depth: 1.02, bevelEnabled: true, bevelSize: 0.08, bevelThickness: 0.08, bevelSegments: 3, curveSegments: 16
-  }), MAT.gold, 0, 0.5, -0.51);
+  }), MAT.coachIvory, 0, 0.5, -0.51);
   coach.add(cabin);
 
   // Arched windows on both flanks, each with its own gold surround.
@@ -736,7 +827,13 @@ function buildCarriage() {
   arch.closePath();
   const paneGeo = new THREE.ExtrudeGeometry(arch, { depth: 0.05, bevelEnabled: false, curveSegments: 14 });
   [[-0.33, 1], [0.33, 1], [-0.33, -1], [0.33, -1]].forEach(([px, side]) => {
-    coach.add(mesh(paneGeo, MAT.glass, px, 0.72, side * 0.56));
+    const paneMaterial = MAT.glass.clone();
+    paneMaterial.color.setHex(0x123b3c);
+    paneMaterial.emissive.setHex(0x061c20);
+    paneMaterial.emissiveIntensity = .55;
+    const pane = mesh(paneGeo, paneMaterial, px, 0.93, side * 0.60);
+    pane.scale.y = 1.2;
+    coach.add(pane);
     const surroundShape = new THREE.Shape();
     surroundShape.moveTo(-0.3, -0.36);
     surroundShape.lineTo(0.3, -0.36);
@@ -746,7 +843,8 @@ function buildCarriage() {
     surroundShape.closePath();
     surroundShape.holes.push(new THREE.Path(arch.getPoints(24)));
     const surround = mesh(new THREE.ExtrudeGeometry(surroundShape, { depth: 0.04, bevelEnabled: false, curveSegments: 14 }),
-      MAT.goldDeep, px, 0.72, side * 0.585);
+      MAT.coachGold, px, 0.93, side * 0.625);
+    surround.scale.y = 1.2;
     coach.add(surround);
   });
   // Door seam and handle on the near flank.
@@ -766,7 +864,14 @@ function buildCarriage() {
   });
 
   // Crown finial and corner spires.
-  const crown = group(0, 1.14, 0);
+  const dome = mesh(new THREE.SphereGeometry(1, 40, 24, 0, Math.PI * 2, 0, Math.PI / 2), MAT.coachIvory, 0, 1.57, 0);
+  dome.scale.set(1.04, .39, .70);
+  coach.add(dome);
+  const eave = mesh(new THREE.TorusGeometry(1, .04, 10, 48), MAT.goldDeep, 0, 1.59, 0);
+  eave.rotation.x = Math.PI / 2;
+  eave.scale.y = .69;
+  coach.add(eave);
+  const crown = group(0, 1.98, 0);
   coach.add(crown);
   crown.add(mesh(new THREE.CylinderGeometry(0.16, 0.2, 0.1, 12), MAT.gold));
   for (let i = 0; i < 6; i++) {
@@ -777,6 +882,17 @@ function buildCarriage() {
     crown.add(spike);
   }
   crown.add(mesh(new THREE.SphereGeometry(0.07, 12, 10), MAT.amber, 0, 0.28, 0));
+  pair((side) => {
+    [-.81, 0, .81].forEach((x) => {
+      coach.add(mesh(new THREE.CylinderGeometry(.035, .045, .93, 12), MAT.gold, x, .94, side * .64));
+      coach.add(mesh(new THREE.SphereGeometry(.055, 12, 10), MAT.gold, x, 1.45, side * .64));
+    });
+    for (let i = 0; i < 9; i++) {
+      const scroll = mesh(new THREE.TorusGeometry(.092, .014, 6, 18, Math.PI * 1.7), MAT.goldDeep, -.73 + i * .18, .20, side * .60);
+      scroll.rotation.z = i % 2 ? Math.PI : 0;
+      coach.add(scroll);
+    }
+  });
 
   // Lanterns
   const lanterns = pair((side) => {
@@ -805,8 +921,12 @@ function buildCarriage() {
   });
 
   // --- Draught pegasus --------------------------------------------
-  const horse = buildHorse({ coat: MAT.coat, winged: true, rider: false, scale: 1 });
-  horse.root.position.set(-0.85, 0.46, 0);
+  const horse = buildHorse({ coat: MAT.coat, winged: true, rider: false, scale: .78 });
+  horse.root.position.set(-1.18, 0.15, 0);
+  horse.wings?.forEach((wing) => {
+    wing.root.scale.setScalar(.95);
+    wing.root.position.set(-.20, .06, wing.side * .12);
+  });
   root.add(horse.root);
 
   // Shafts and traces from the coach to the harness.
@@ -824,7 +944,7 @@ function buildCarriage() {
   root.position.x = -0.6;
 
   return {
-    root, horse,
+    root, horse, ready: horse.ready,
     update(t, u, ctx = {}) {
       horse.update(t, u, { speed: 7.4, gait: 0.72 });
       const roll = Math.sin(t * 7.4 * 2) * 0.02;
@@ -1287,7 +1407,7 @@ const ENTRIES = {
     label: 'Horse rider',
     accent: 0xffa845,
     trail: { color: 0xff8a1e, width: 0.12, span: 0.09 },
-    scale: 0.95, y: -0.32,
+    scale: 1.2, y: -0.28,
     build: () => buildHorse({ coat: MAT.coatWarm, rider: true }),
     // assets/models/horse.glb faces +z, so a quarter turn puts it on the path.
     model: { rotationY: -Math.PI / 2, length: 3.3, groundY: -1.45, cadence: 8.4 },
@@ -1306,7 +1426,7 @@ const ENTRIES = {
     label: 'Royal rath',
     accent: 0xe0a6ff,
     trail: { color: 0xc98bff, width: 0.14, span: 0.08 },
-    scale: 0.8, y: -0.42,
+    scale: 1.0, y: -0.42,
     build: () => buildCarriage(),
     pool: 0xd79bff,
     path(u) {
@@ -1477,6 +1597,15 @@ export function createEntryEngine(canvas, opts = {}) {
   const composer = new EffectComposer(renderer);
   composer.addPass(new RenderPass(scene, camera));
   const bloom = new UnrealBloomPass(new THREE.Vector2(512, 512), lowPower ? 0.28 : 0.42, 0.5, 0.9);
+  // The stock blur writes alpha=1 over every pixel. Preserve the blurred
+  // alpha too, so the voice-room background shows through around the entry.
+  bloom.separableBlurMaterials.forEach((material) => {
+    material.fragmentShader = material.fragmentShader
+      .replace('vec3 diffuseSum = texture2D( colorTexture, vUv ).rgb * weightSum;', 'vec4 diffuseSum = texture2D( colorTexture, vUv ) * weightSum;')
+      .replace('vec3 sample1 = texture2D( colorTexture, vUv + uvOffset ).rgb;', 'vec4 sample1 = texture2D( colorTexture, vUv + uvOffset );')
+      .replace('vec3 sample2 = texture2D( colorTexture, vUv - uvOffset ).rgb;', 'vec4 sample2 = texture2D( colorTexture, vUv - uvOffset );')
+      .replace('vec4(diffuseSum/weightSum, 1.0)', 'diffuseSum/weightSum');
+  });
   composer.addPass(bloom);
   composer.addPass(new OutputPass());
 
@@ -1715,8 +1844,9 @@ export function createEntryEngine(canvas, opts = {}) {
     /** Preload a ride's geometry so the first click has no hitch. */
     prepare(name) {
       if (!ENTRIES[name]) return;
-      rigFor(name);
+      const entry = rigFor(name);
       if (!opts.noModels) tryLoadModel(name);
+      return entry.rig.ready;
     },
     play(name, duration, done) {
       if (!ENTRIES[name]) return false;
