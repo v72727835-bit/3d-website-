@@ -18,6 +18,7 @@ import { RenderPass } from './vendor/three/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from './vendor/three/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from './vendor/three/postprocessing/OutputPass.js';
 import { GLTFLoader } from './vendor/three/loaders/GLTFLoader.js';
+import { articulateDetailedHorse, createSunsetLandscape, createArrivalMist } from './horse-motion.js';
 
 // The anatomical morph-target mesh supplies the actual gallop. Armour,
 // carriage, wings and lighting remain live Three.js geometry.
@@ -285,12 +286,12 @@ function buildMaterials() {
   const grain = () => ({ roughnessMap: TEX.grainRough, normalMap: TEX.grainNormal, normalScale: new THREE.Vector2(0.45, 0.45) });
   MAT.gold = std({ color: 0xf0b444, metalness: 1, roughness: 0.3, emissive: 0x190d00, envMapIntensity: 1.5, ...metal() });
   MAT.goldDeep = std({ color: 0xd08c2a, metalness: 1, roughness: 0.44, emissive: 0x1d0e00, envMapIntensity: 1.7, ...metal() });
-  MAT.coachIvory = new THREE.MeshPhysicalMaterial({ color: 0xffedc6, metalness: 0.12, roughness: 0.3, clearcoat: 0.88, clearcoatRoughness: 0.2, envMapIntensity: 1.15 });
+  MAT.coachIvory = new THREE.MeshPhysicalMaterial({ color: 0xdb9f37, metalness: 0.72, roughness: 0.29, clearcoat: 0.65, clearcoatRoughness: 0.24, envMapIntensity: 1.05 });
   MAT.coachGold = new THREE.MeshPhysicalMaterial({ color: 0xc99335, metalness: 0.92, roughness: 0.3, clearcoat: 0.5, clearcoatRoughness: 0.2, envMapIntensity: 1.5 });
   MAT.silver = std({ color: 0xc8d2e8, metalness: 1, roughness: 0.32, envMapIntensity: 1.5, ...metal() });
   MAT.steel = std({ color: 0x7c88a4, metalness: 1, roughness: 0.48, envMapIntensity: 1.2, ...metal() });
   MAT.dark = std({ color: 0x1b2038, metalness: 0.7, roughness: 0.6, envMapIntensity: 1.1, ...grain() });
-  MAT.coat = std({ color: 0xfff9ec, metalness: 0.03, roughness: 0.57, envMapIntensity: 0.85, ...fur() });
+  MAT.coat = std({ color: 0xc8c4b9, metalness: 0.02, roughness: 0.62, envMapIntensity: 0.65, ...fur() });
   MAT.coatWarm = std({ color: 0x6b3019, metalness: 0.04, roughness: 0.51, envMapIntensity: 1.05, ...fur() });
   MAT.hoof = std({ color: 0x2a2233, metalness: 0.35, roughness: 0.62, ...grain() });
   MAT.mane = std({ color: 0x2c1d14, metalness: 0.15, roughness: 0.66, emissive: 0x160c04, envMapIntensity: 1.1, ...fur() });
@@ -390,14 +391,22 @@ function buildFeatherWing(side, { span = 2.0, rows = 3, per = 8, mat = MAT.feath
     const rowScale = 0.5 + r * 0.28;
     for (let i = 0; i < per; i++) {
       const k = i / (per - 1);
-      const theta = lerp(1.22, -0.08, k);            // up at the leading edge, swept back at the tip
+      const theta = lerp(1.55, 0.38, k);            // raised leading edge, swept primary feathers
       const len = span * rowScale * lerp(0.55, 1, Math.sin(Math.PI * (0.18 + 0.72 * k)));
       const pivot = group(0.05 + r * 0.06, 0.1, side * (0.08 + r * 0.09));
       pivot.rotation.z = theta;
       pivot.rotation.y = side * (0.1 + k * 0.28);
-      const feather = mesh(new THREE.CapsuleGeometry(0.125 - r * 0.018, len * 0.84, 4, 10), mat, len / 2, 0, 0);
-      feather.rotation.z = Math.PI / 2;
-      feather.scale.set(1, 1, 0.22);                 // flatten each feather into a blade
+      // A tapered vane with a raised central shaft and a curved tip. Capsules
+      // made the wings look like a fan of plastic fingers.
+      const vane = new THREE.PlaneGeometry(1, 1, 16, 6);
+      const points = vane.attributes.position;
+      for (let n=0;n<points.count;n++) {
+        const u=points.getX(n)+0.5, v=points.getY(n)*2;
+        const width=(0.12-r*0.012)*Math.pow(Math.sin(Math.PI*u),0.65);
+        points.setXYZ(n,u*len,v*width,0.038*(1-Math.abs(v))*Math.sin(Math.PI*u)+u*u*0.08);
+      }
+      vane.computeVertexNormals();
+      const feather = mesh(vane, mat);
       pivot.add(feather);
       mid.add(pivot);
     }
@@ -676,10 +685,14 @@ function buildHorse({ coat = MAT.coat, winged = false, rider = true, scale = 1 }
 
   root.scale.setScalar(scale);
 
-  let morphMixer = null, previousTime = 0;
+  let morphMixer = null, previousTime = 0, anatomicalRig = null;
   const ready = horseAsset().then((asset) => {
-    const anatomy = asset.scene;
-    anatomy.rotation.y = -Math.PI / 2;
+    // Keep the authored scene transforms intact. Fit a detached wrapper so
+    // fitting never depends on the parent carriage's scale or current pose.
+    const anatomy = new THREE.Group();
+    anatomy.add(asset.scene);
+    asset.scene.rotation.y = -Math.PI / 2;
+    anatomy.updateMatrixWorld(true);
     const box = new THREE.Box3().setFromObject(anatomy);
     const size = box.getSize(new THREE.Vector3());
     const center = box.getCenter(new THREE.Vector3());
@@ -692,26 +705,46 @@ function buildHorse({ coat = MAT.coat, winged = false, rider = true, scale = 1 }
     anatomy.traverse((part) => {
       if (!part.isMesh) return;
       part.geometry = part.geometry.clone();
-      const positions = part.geometry.attributes.position;
-      const colors = new Float32Array(positions.count * 3);
-      for (let i = 0; i < positions.count; i++) {
-        const x = positions.getX(i), y = positions.getY(i), z = positions.getZ(i);
-        const hoof = 1 - smooth(clamp((y - 18) / 15, 0, 1));
-        const mane = Math.abs(x) < 6 && y > 132 && z > 15 ? .75 : 0;
-        const tail = z < -110 && y > 45 ? .82 : 0;
-        const shade = 1 - Math.max(hoof * .75, mane, tail) * (winged ? .2 : 1);
-        colors.set([shade, shade, shade], i * 3);
-      }
-      part.geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+      const original = part.material.name;
       part.material = coat.clone();
-      part.material.vertexColors = true;
-      part.material.normalScale.setScalar(.16);
+      if (/Eye_Black/i.test(original)) {
+        part.material.color.setHex(0x090a0e); part.material.roughness=.12;
+      } else if (/Eye_White/i.test(original)) {
+        part.material.color.setHex(0x918779);
+      } else if (/Hooves/i.test(original)) {
+        part.material.color.setHex(winged ? 0x9f7850 : 0x282329); part.material.roughness=.48;
+      } else if (/Hair/i.test(original)) {
+        part.material.color.setHex(winged ? 0xa17e35 : 0x201612); part.material.roughness=.68;
+      } else if (/Muzzle/i.test(original)) {
+        part.material.color.setHex(winged ? 0x83756b : 0x39251f);
+      } else if (/Main_Dark/i.test(original)) {
+        part.material.color.setHex(winged ? 0xaaa79f : 0x592615);
+      }
+      part.material.metalness=.025;
+      part.material.normalScale.setScalar(.08);
+      part.frustumCulled=false;
       part.castShadow = part.receiveShadow = true;
     });
     body.children.forEach((part) => {
       if (part !== man?.root && !wings?.some((w) => w.root === part)) part.visible = false;
     });
     root.add(anatomy);
+    if (winged) {
+      const face = group();
+      const eyeMaterial = new THREE.MeshPhysicalMaterial({color:0x070706,roughness:.12,clearcoat:1});
+      for (const side of [-1,1]) {
+        face.add(mesh(new THREE.SphereGeometry(.029,12,10),eyeMaterial,-.10,.035,side*.12));
+        face.add(mesh(new THREE.SphereGeometry(.008,8,6),MAT.silver,-.107,.045,side*.143));
+        const cheekStrap=mesh(new THREE.CapsuleGeometry(.012,.26,3,8),MAT.goldDeep,-.12,-.035,side*.12);
+        cheekStrap.rotation.z=-.35; face.add(cheekStrap);
+        const bit=mesh(new THREE.TorusGeometry(.041,.009,6,18),MAT.gold,-.19,-.17,side*.13);
+        face.add(bit);
+      }
+      root.add(face);
+      const collar=mesh(new THREE.TorusGeometry(.27,.022,8,36),MAT.coachGold);
+      collar.rotation.y=Math.PI/2;collar.rotation.z=-.5;root.add(collar);
+      anatomicalRig={head:asset.scene.getObjectByName('Head'),shoulder:asset.scene.getObjectByName('Neck1'),face,collar,position:new THREE.Vector3()};
+    }
     if (man) {
       man.root.position.set(-.08, .30, 0);
       man.root.scale.setScalar(1.08);
@@ -720,12 +753,12 @@ function buildHorse({ coat = MAT.coat, winged = false, rider = true, scale = 1 }
       body.add(saddle);
     }
     if (asset.animations.length) {
-      morphMixer = new THREE.AnimationMixer(anatomy);
+      morphMixer = new THREE.AnimationMixer(asset.scene);
       const gallop = THREE.AnimationClip.findByName(asset.animations, 'Gallop') || asset.animations.find((clip) => /gallop$/i.test(clip.name)) || asset.animations[0];
       morphMixer.clipAction(gallop).setDuration(.72).play();
     }
     return true;
-  }).catch(() => false);
+  }).catch((error) => { console.warn('Animated horse unavailable; using articulated fallback.', error); return false; });
 
   return {
     root, body, head, neck, wings, rider: man, ready,
@@ -734,6 +767,18 @@ function buildHorse({ coat = MAT.coat, winged = false, rider = true, scale = 1 }
         if (t < previousTime) morphMixer.setTime(0);
         morphMixer.update(Math.min(Math.max(t - previousTime, 0), .075));
         previousTime = t;
+      }
+      if (anatomicalRig) {
+        // Keep the face details and wing roots attached to the animated animal,
+        // including when its neck rises during the stride.
+        root.updateMatrixWorld(true);
+        const rig=anatomicalRig;
+        rig.face.position.copy(root.worldToLocal(rig.head.getWorldPosition(rig.position)));
+        rig.collar.position.copy(root.worldToLocal(rig.shoulder.getWorldPosition(rig.position)));
+        for (const wing of wings) {
+          const shoulder=body.worldToLocal(rig.shoulder.getWorldPosition(rig.position));
+          wing.root.position.copy(shoulder).add(new THREE.Vector3(.25,.02,wing.side*.21));
+        }
       }
       const speed = ctx.speed ?? 9.5;
       const gait = t * speed;
@@ -800,6 +845,7 @@ function buildCarriage() {
 
   // --- Coach -------------------------------------------------------
   const coach = group(1.55, 0.05, 0);
+  coach.scale.set(1.04, .87, 1);
   root.add(coach);
 
   const profile = new THREE.Shape();
@@ -831,6 +877,11 @@ function buildCarriage() {
     paneMaterial.color.setHex(0x123b3c);
     paneMaterial.emissive.setHex(0x061c20);
     paneMaterial.emissiveIntensity = .55;
+    paneMaterial.transparent = false;
+    paneMaterial.opacity = 1;
+    paneMaterial.metalness = .38;
+    paneMaterial.roughness = .16;
+    paneMaterial.envMapIntensity = .45;
     const pane = mesh(paneGeo, paneMaterial, px, 0.93, side * 0.60);
     pane.scale.y = 1.2;
     coach.add(pane);
@@ -921,11 +972,11 @@ function buildCarriage() {
   });
 
   // --- Draught pegasus --------------------------------------------
-  const horse = buildHorse({ coat: MAT.coat, winged: true, rider: false, scale: .78 });
-  horse.root.position.set(-1.18, 0.15, 0);
+  const horse = buildHorse({ coat: MAT.coat, winged: true, rider: false, scale: .72 });
+  horse.root.position.set(-1.38, 0.20, 0);
   horse.wings?.forEach((wing) => {
     wing.root.scale.setScalar(.95);
-    wing.root.position.set(-.20, .06, wing.side * .12);
+    wing.root.position.set(-.20, .28, wing.side * .23);
   });
   root.add(horse.root);
 
@@ -936,10 +987,36 @@ function buildCarriage() {
     root.add(shaft);
     return shaft;
   });
-  const harness = mesh(new THREE.TorusGeometry(0.42, 0.04, 8, 24), MAT.crimson, -1.35, 0.18, 0);
-  harness.rotation.y = Math.PI / 2;
-  harness.scale.set(1, 0.85, 1);
-  root.add(harness);
+  // The visible collar follows the animated neck inside buildHorse.
+
+  // Curved leather traces, sprung chassis and wrought roof ribs follow the
+  // horse and coach proportions instead of floating between the two rigs.
+  const tube = (parent, vertices, radius, material) => {
+    const curve = new THREE.CatmullRomCurve3(vertices.map(v=>new THREE.Vector3(...v)));
+    parent.add(mesh(new THREE.TubeGeometry(curve,32,radius,6,false),material));
+  };
+  const leather = new THREE.MeshStandardMaterial({color:0x58311b,roughness:.72});
+  for (const side of [-1,1]) {
+    tube(root,[[-1.86,.25,side*.23],[-1.0,-.02,side*.28],[-.1,.08,side*.38],[.51,.43,side*.4]],.012,leather);
+    tube(coach,[[-.96,-.40,side*.47],[-.55,-.59,side*.47],[0,-.52,side*.47],[.7,-.43,side*.47]],.023,MAT.goldDeep);
+    for(let rib=0;rib<5;rib++) {
+      const a=Math.PI*(rib/4);
+      const vertices=[];
+      for(let j=0;j<=12;j++) {
+        const t=j/12*Math.PI/2;
+        vertices.push([Math.cos(a)*Math.sin(t)*1.04,1.57+Math.cos(t)*.39,side*Math.sin(a)*Math.sin(t)*.71]);
+      }
+      tube(coach,vertices,.018,MAT.coachGold);
+    }
+    // Gold leaf scrollwork on the lower panels and a usable coach step.
+    for(let i=0;i<5;i++) {
+      const x=-.63+i*.32;
+      tube(coach,[[x-.11,.32,side*.64],[x-.04,.42,side*.66],[x,.32,side*.67],[x+.04,.42,side*.66],[x+.11,.32,side*.64]],.012,MAT.gold);
+    }
+    const step=mesh(new THREE.BoxGeometry(.52,.05,.22),MAT.dark,0,-.54,side*.73);
+    coach.add(step);
+    coach.add(mesh(new THREE.BoxGeometry(.54,.035,.025),MAT.coachGold,0,-.50,side*.85));
+  }
 
   root.position.x = -0.6;
 
@@ -1548,6 +1625,10 @@ export function createEntryEngine(canvas, opts = {}) {
   // --- Stage dressing ----------------------------------------------
   const stage = new THREE.Group();
   scene.add(stage);
+  const sunset = createSunsetLandscape();
+  stage.add(sunset.plane);
+  const mist = createArrivalMist();
+  stage.add(mist.plane);
 
   const pool = mesh(new THREE.PlaneGeometry(7.2, 3.4), additive(0xc79bff, 0.5, TEX.pool), 0, -1.86, 1.0);
   pool.rotation.x = -1.16;
@@ -1694,9 +1775,11 @@ export function createEntryEngine(canvas, opts = {}) {
 
       const carrier = new THREE.Group();     // the node procedural motion drives
       carrier.add(model);
+      await e.rig.ready;
       e.rig.root.clear();
       e.rig.root.add(carrier);
       e.glb = { carrier, spec };
+      if (name === 'horse' && !gltf.animations?.length) e.glb.articulation = articulateDetailedHorse(model);
 
       if (gltf.animations?.length) {
         const mixer = new THREE.AnimationMixer(model);
@@ -1704,7 +1787,8 @@ export function createEntryEngine(canvas, opts = {}) {
         e.mixer = mixer;
       }
       return true;
-    } catch {
+    } catch (error) {
+      console.warn(`Detailed ${name} model unavailable; using procedural fallback.`, error);
       return false;                          // the procedural rig stays in place
     }
   }
@@ -1757,6 +1841,7 @@ export function createEntryEngine(canvas, opts = {}) {
       // which are tuned for the warm, dim key light.
       sky.intensity = 1.15;
       if (e.mixer) e.mixer.update(dt);
+      else if (e.glb.articulation) e.glb.articulation.update(t, e.glb.carrier);
       else animateStaticModel(e.glb, t, u);
     } else {
       sky.intensity = 0.45;
@@ -1765,6 +1850,14 @@ export function createEntryEngine(canvas, opts = {}) {
 
     // Fade the ride in and out at the edges instead of popping.
     const vis = window01(u, 0.07, 0.94);
+    sunset.update(t, e.key === 'horse' ? vis : 0);
+    mist.update(t, e.key === 'carriage' ? vis : 0, p.x);
+    // Neutral fill reveals anatomy and gold embossing without bleaching the
+    // pegasus white or turning the reflective coach windows beige.
+    const natural = e.key === 'horse' || e.key === 'carriage';
+    key.intensity = natural ? 2.15 : 1.55;
+    rim.intensity = natural ? .8 : 1.25;
+    if (natural) sky.intensity = .85;
     e.rig.root.visible = vis > 0.02;
 
     // Trail is laid along the path already flown, anchored just behind the body.
@@ -1783,13 +1876,13 @@ export function createEntryEngine(canvas, opts = {}) {
     contact.material.opacity = vis * 0.7 * (1 - lift * 0.72);
     contact.scale.setScalar(1 + lift * 0.7);
     hero.position.set(p.x, e.cfg.y + p.y + 0.6, p.z + 2.2);
-    hero.intensity = vis * 4;
+    hero.intensity = vis * (natural ? 1.2 : 4);
     hero.color.setHex(e.cfg.accent);
     pool.position.x = p.x * 0.55;
     pool.material.color.setHex(e.cfg.pool);
     pool.material.opacity = 0.12 + vis * 0.26;
     podium.material.opacity = vis * 0.16;
-    under.intensity = 2.5 + vis * 4;
+    under.intensity = natural ? .8 + vis : 2.5 + vis * 4;
 
     // Arrival flare and spark burst peak as the ride reaches centre.
     const peak = pulse(u, 0.4, 0.13);
@@ -1845,8 +1938,7 @@ export function createEntryEngine(canvas, opts = {}) {
     prepare(name) {
       if (!ENTRIES[name]) return;
       const entry = rigFor(name);
-      if (!opts.noModels) tryLoadModel(name);
-      return entry.rig.ready;
+      return Promise.all([entry.rig.ready, opts.noModels ? false : tryLoadModel(name)]);
     },
     play(name, duration, done) {
       if (!ENTRIES[name]) return false;

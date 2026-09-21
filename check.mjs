@@ -8,7 +8,7 @@ import { copyFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const files = ['dist/entry3d.js', 'dist/entrysfx.js'];
+const files = ['dist/entry3d.js', 'dist/entrysfx.js', 'dist/horse-motion.js'];
 const dir = mkdtempSync(join(tmpdir(), 'entry-check-'));
 try {
   for (const file of files) {
