@@ -77,6 +77,11 @@
     <aside class="menu-panel" id="menu-panel" hidden><h2>Your next entrances</h2><p>01 · Horse rider</p><p>02 · Royal rath</p><p>03 · Superbike</p><p>04 · Golden dragon</p><small>The sequence repeats after the dragon.</small><button id="menu-reset">Start from horse rider</button></aside>
     <dialog id="edit-dialog"><form id="edit-form"><h2>Edit room</h2><label for="name-input">Room name</label><input id="name-input" name="roomName" maxlength="30" value="Sharma Agency" required autocomplete="off"><label for="arrival-input">Entrance name</label><input id="arrival-input" name="arrivalName" maxlength="20" value="SHARMA" required autocomplete="off"><div class="dialog-buttons"><button type="button" id="cancel-edit">Cancel</button><button type="submit">Save</button></div></form></dialog>
   </main>
+  <script>
+    // Rides listed here load assets/models/<key>.glb instead of the built-in
+    // rig. Remove a key to fall back to the procedural version.
+    window.ENTRY3D_MODELS = ['horse'];
+  </script>
   <script src="main.js" defer></script>
 </body>
 </html>

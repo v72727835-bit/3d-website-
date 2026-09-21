@@ -62,17 +62,41 @@ video and CSS entrances play instead.
 
 ## Dropping in a 3D model
 
-To replace a procedural body with a GLB, list its key before `main.js` runs and
-put the file next to the page:
+`dist/index.html` lists which rides load a GLB instead of their built-in rig:
 
 ```html
-<script>window.ENTRY3D_MODELS = ['dragon'];</script>
+<script>window.ENTRY3D_MODELS = ['horse'];</script>
 ```
 
-with `dist/assets/models/dragon.glb`. The model is scaled and grounded
-automatically, its first animation clip is played if it has one, and the flight
-path, lighting, trail, sparks and camera work are applied unchanged. Keys are
-`horse`, `carriage`, `bike` and `dragon`.
+Each listed key loads `dist/assets/models/<key>.glb`. Keys are `horse`,
+`carriage`, `bike` and `dragon`; remove one to go back to the procedural
+version. The flight path, lighting, shadows, trail, sparks, camera and sound
+all apply unchanged.
+
+Downloaded models arrive facing any direction at any scale, so each entry in
+`ENTRIES` carries a `model` block — `rotationY` to turn it onto the path,
+`length` and `groundY` to fit it to the same space the built-in rig occupies.
+`horse` is set to `rotationY: -Math.PI / 2` because that model faces +z.
+Imported materials get a stronger environment contribution and lose the
+double-sided flag exporters tend to set, since photographic textures need more
+neutral fill than the stage's warm key light gives the stylised rigs.
+
+If a model carries animation clips the first one plays. Most downloaded models
+carry none, and a rigid mesh cannot move its own legs, so the stride is faked
+on the body: a bounding rise and fall, a pitch that leads it, and a little
+roll. It reads as motion, but it is not a gallop — the built-in rigs remain
+the only ones that actually articulate.
+
+Models need preparing for the web before they go in here. The horse started as
+a 57 MB, 1.07-million-vertex scan, which would have taken minutes to load on a
+phone. Simplified to 110k vertices, its texture resized to 1024 and the whole
+thing meshopt-compressed, it ships at 1.4 MB:
+
+```
+gltf-transform simplify in.glb a.glb --ratio 0.07 --error 0.002
+gltf-transform resize   a.glb  b.glb --width 1024 --height 1024
+gltf-transform meshopt  b.glb  dist/assets/models/horse.glb
+```
 
 ## Notes
 

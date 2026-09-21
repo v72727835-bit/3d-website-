@@ -1289,6 +1289,8 @@ const ENTRIES = {
     trail: { color: 0xff8a1e, width: 0.12, span: 0.09 },
     scale: 0.95, y: -0.32,
     build: () => buildHorse({ coat: MAT.coatWarm, rider: true }),
+    // assets/models/horse.glb faces +z, so a quarter turn puts it on the path.
+    model: { rotationY: -Math.PI / 2, length: 3.3, groundY: -1.45, cadence: 8.4 },
     pool: 0xffa23c,
     path(u) {
       const x = crossing(u, 7.2, -7.6, 0.15, 0.3, 0.66, 0.5);
@@ -1420,7 +1422,8 @@ export function createEntryEngine(canvas, opts = {}) {
   scene.add(under);
   const hero = new THREE.PointLight(0xffc978, 0, 12, 2);
   scene.add(hero);
-  scene.add(new THREE.HemisphereLight(0x8fb6ff, 0x120a24, 0.45));
+  const sky = new THREE.HemisphereLight(0x8fb6ff, 0x120a24, 0.45);
+  scene.add(sky);
 
   // --- Stage dressing ----------------------------------------------
   const stage = new THREE.Group();
@@ -1508,32 +1511,86 @@ export function createEntryEngine(canvas, opts = {}) {
   }
 
   /**
-   * Swap the procedural body for a GLB.
+   * Swap the procedural body for a downloaded GLB.
+   *
    * Opt in by listing keys on the page before main.js runs, e.g.
-   *   window.ENTRY3D_MODELS = ['dragon'];
-   * and dropping assets/models/dragon.glb next to it. Everything else — the
-   * flight path, lighting, trail, sparks and camera — is applied unchanged.
+   *   window.ENTRY3D_MODELS = ['horse'];
+   * and dropping assets/models/horse.glb next to it. The flight path,
+   * lighting, trail, sparks, shadows and camera work all still apply.
+   *
+   * Downloaded models arrive facing any direction and at any scale, so each
+   * entry's `model` block says how to aim and size it; the mesh is then fitted
+   * to the same length and ground line the procedural rig occupies. Most
+   * downloaded models carry no animation, so one is driven procedurally.
    */
   async function tryLoadModel(name) {
     if (!(window.ENTRY3D_MODELS || []).includes(name)) return false;
-    const url = `assets/models/${name}.glb`;
     try {
-      const { GLTFLoader } = await import('./vendor/three/loaders/GLTFLoader.js');
-      const gltf = await new GLTFLoader().loadAsync(url);
+      const [{ GLTFLoader }, { MeshoptDecoder }] = await Promise.all([
+        import('./vendor/three/loaders/GLTFLoader.js'),
+        import('./vendor/three/libs/meshopt_decoder.module.js')
+      ]);
+      const loader = new GLTFLoader();
+      loader.setMeshoptDecoder(MeshoptDecoder);
+      const gltf = await loader.loadAsync(`assets/models/${name}.glb`);
+
       const e = rigFor(name);
-      e.rig.root.clear();
-      const box = new THREE.Box3().setFromObject(gltf.scene);
+      const spec = { rotationY: 0, length: 3.3, groundY: -1.45, ...(e.cfg.model || {}) };
+      const model = gltf.scene;
+      model.rotation.y = spec.rotationY;
+      model.updateMatrixWorld(true);
+
+      // Fit on the oriented bounds, not the raw ones — a model that faces +z
+      // has its length on a different axis before it is turned.
+      const box = new THREE.Box3().setFromObject(model);
       const size = new THREE.Vector3(); box.getSize(size);
-      gltf.scene.scale.setScalar(3.2 / Math.max(size.x, 0.001));
-      gltf.scene.position.y = -box.min.y * gltf.scene.scale.y - 1.2;
-      e.rig.root.add(gltf.scene);
+      const fit = spec.length / Math.max(size.x, 0.0001);
+      model.scale.setScalar(fit);
+      model.position.set(-(box.min.x + size.x / 2) * fit, -box.min.y * fit + spec.groundY, -(box.min.z + size.z / 2) * fit);
+
+      model.traverse((o) => {
+        if (!o.isMesh) return;
+        if (shadows) { o.castShadow = true; o.receiveShadow = true; }
+        // Downloaded models are usually lit flat, with a base-colour texture
+        // and nothing else. The stage's key light is warm and dim by design,
+        // so lean on the neutral environment to carry them, and drop the
+        // double-sided flag most exporters set on a closed mesh.
+        const mats = Array.isArray(o.material) ? o.material : [o.material];
+        mats.forEach((m) => {
+          if (!m) return;
+          if ('envMapIntensity' in m) m.envMapIntensity = 2.4;
+          if (m.side === THREE.DoubleSide) m.side = THREE.FrontSide;
+        });
+      });
+
+      const carrier = new THREE.Group();     // the node procedural motion drives
+      carrier.add(model);
+      e.rig.root.clear();
+      e.rig.root.add(carrier);
+      e.glb = { carrier, spec };
+
       if (gltf.animations?.length) {
-        const mixer = new THREE.AnimationMixer(gltf.scene);
+        const mixer = new THREE.AnimationMixer(model);
         mixer.clipAction(gltf.animations[0]).play();
         e.mixer = mixer;
       }
       return true;
-    } catch { return false; }
+    } catch {
+      return false;                          // the procedural rig stays in place
+    }
+  }
+
+  /** Canter-like motion for a GLB with no clips of its own. */
+  function animateStaticModel(glb, t, u) {
+    const { carrier } = glb;
+    const beat = t * (glb.spec.cadence ?? 8.4);
+    // A rigid mesh cannot move its legs, so sell the stride with the body:
+    // a bounding rise and fall, a pitch that leads it, and a little roll.
+    carrier.position.y = Math.abs(Math.sin(beat)) * 0.2 - 0.07;
+    carrier.position.x = Math.sin(beat * 0.5) * 0.07;
+    carrier.rotation.z = Math.sin(beat + 0.9) * 0.075;
+    carrier.rotation.x = Math.sin(beat * 0.5) * 0.04;
+    void u;
   }
 
   // --- Playback -----------------------------------------------------
@@ -1566,8 +1623,16 @@ export function createEntryEngine(canvas, opts = {}) {
     const p = e.cfg.path(u);
     e.pivot.position.set(p.x, e.cfg.y + p.y, p.z);
     e.pivot.rotation.set(0, p.ry, p.rz);
-    e.rig.update(t, u, { travel: p.travel });
-    e.mixer?.update(dt);
+    if (e.glb) {
+      // Photographic textures need more neutral fill than the stylised rigs,
+      // which are tuned for the warm, dim key light.
+      sky.intensity = 1.15;
+      if (e.mixer) e.mixer.update(dt);
+      else animateStaticModel(e.glb, t, u);
+    } else {
+      sky.intensity = 0.45;
+      e.rig.update(t, u, { travel: p.travel });
+    }
 
     // Fade the ride in and out at the edges instead of popping.
     const vis = window01(u, 0.07, 0.94);
