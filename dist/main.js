@@ -144,7 +144,10 @@
     $('menu-panel').hidden = true;
     $('menu').setAttribute('aria-expanded', 'false');
     updateControls(index);
-    await engineReady;
+    // If the renderer already exists, begin with its lightweight procedural
+    // rig immediately. Background model preloading can finish independently
+    // instead of making the first tap wait for every entrance asset.
+    if (!gl) await engineReady;
     if (token !== run) return;
     $('message-heading').textContent = `${entry.name} is arriving`;
     $('message-detail').textContent = 'The room is yours.';

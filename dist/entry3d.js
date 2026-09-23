@@ -22,9 +22,13 @@ import { articulateDetailedHorse, createSunsetLandscape, createArrivalMist } fro
 
 // The anatomical morph-target mesh supplies the actual gallop. Armour,
 // carriage, wings and lighting remain live Three.js geometry.
+let detailedHorseAsset = null;
 function horseAsset() {
-  // A fresh parse gives each skinned horse an independent skeleton/mixer.
-  return new GLTFLoader().loadAsync('assets/models/horse-anatomy.glb');
+  // Both the rider and rath need the same model. Fetch and decode it once,
+  // then give each rig a detached scene clone; this removes the first-click
+  // network/decode hitch without sharing transform state between entrances.
+  detailedHorseAsset ??= new GLTFLoader().loadAsync('assets/models/horse-anatomy.glb');
+  return detailedHorseAsset.then((asset) => ({ ...asset, scene: asset.scene.clone(true) }));
 }
 
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
@@ -1638,8 +1642,11 @@ export function createEntryEngine(canvas, opts = {}) {
   buildMaterials();
 
   const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const mobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
   const lowPower = (navigator.hardwareConcurrency || 4) <= 4 || /Android [4-8]\./.test(navigator.userAgent);
-  const dpr = Math.min(window.devicePixelRatio || 1, lowPower ? 1.5 : 2);
+  // The stage is only phone-width; capping mobile render density avoids a
+  // costly 2x/3x offscreen bloom buffer without making its edges look soft.
+  const dpr = Math.min(window.devicePixelRatio || 1, lowPower || mobile ? 1.5 : 2);
 
   renderer.setPixelRatio(dpr);
   renderer.setClearAlpha(0);
@@ -2022,7 +2029,13 @@ export function createEntryEngine(canvas, opts = {}) {
     prepare(name) {
       if (!ENTRIES[name]) return;
       const entry = rigFor(name);
-      return Promise.all([entry.rig.ready, opts.noModels ? false : tryLoadModel(name)]);
+      return Promise.all([entry.rig.ready, opts.noModels ? false : tryLoadModel(name)]).then(() => {
+        // Compile materials while the page is idle. Otherwise the first tap
+        // has to compile several physical materials and can pause briefly.
+        entry.rig.root.visible = true;
+        renderer.compile(scene, camera);
+        entry.rig.root.visible = false;
+      });
     },
     play(name, duration, done) {
       if (!ENTRIES[name]) return false;
