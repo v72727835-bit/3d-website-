@@ -19,9 +19,8 @@ the original room UI. Each ride is now a Three.js rig built from articulated
 joints in `dist/entry3d.js` and rendered in real time, so it is sharp at any
 resolution and the motion is generated rather than replayed:
 
-- the detailed horse/knight scan uses continuous GPU deformation fields for
-  four staggered legs, knee flexion, neck nod, tail movement and rider response;
-  the same deformation runs in its shadow pass;
+- the horse runs a real gallop cycle — four legs with staggered hip, knee and
+  fetlock rotations, plus body bounce, mane and tail follow-through;
 - the royal rath is drawn by a pegasus whose feathered wings beat while the
   coach's spoked wheels roll at the speed the coach is actually travelling;
 - the superbike's wheels spin, the nose lifts under power, and the rider stays
@@ -57,18 +56,6 @@ frame. The mix pans right to left with the ride and passes through a small
 generated reverb, into a limiter. Sound is off by default and the toggle
 unlocks the audio context from the click, as browsers require.
 
-The pegasus's animated horse base is the CC0 “Horse” model by Quaternius from Poly Pizza
-(https://poly.pizza/m/qvTrSG9pZF). It is public domain and permitted for
-commercial use. It has been refined with two Loop subdivision passes, interpolated
-skin weights, smooth normals and coat UVs using `scripts/refine-horse.py` (NumPy).
-The page supplies its own materials, tapered feather geometry, bridle and staging.
-The collar and wing roots follow the animated neck. The coach has green window
-panes, a ribbed gold dome, leaf scrolls, suspension and leather traces.
-
-`dist/horse-motion.js` also renders the moving sunset, clouds, distant mountains
-and arrival mist directly in WebGL. They are generated shaders, not reference
-video overlays. First playback waits for model preparation to finish.
-
 The clips in `dist/assets/` are kept only as a fallback: if the browser cannot
 give the page a WebGL context, `main.js` drops the `gl` class and the previous
 video and CSS entrances play instead.
@@ -94,11 +81,23 @@ Imported materials get a stronger environment contribution and lose the
 double-sided flag exporters tend to set, since photographic textures need more
 neutral fill than the stage's warm key light gives the stylised rigs.
 
-If a model carries animation clips the first one plays. The supplied detailed
-horse has no skeleton: `horse-motion.js` articulates its original vertices in a
-vertex shader with smooth leg/neck/tail masks. This preserves the scan and its
-UV texture but is an approximation, not a replacement for a professionally
-weight-painted skeleton. Other imported static models use a small body bounce.
+If a model carries animation clips the first one plays. Most carry none, and
+the horse is one of those, so its legs are swung in the vertex shader instead.
+A `gallop` block on the entry describes the animal in its own axes — the belly
+line legs hang from, the fore and hind hip positions, and the gap between them.
+Each vertex below the belly is weighted from zero at the hip to one at the
+hoof, bent about the knee in the rest pose, then swung about the hip; the same
+rotation is applied to the normal, and a matching depth material keeps the
+shadow in step with the visible mesh.
+
+Two details matter. The four legs are blended rather than branched between: a
+hard left/right test tears every triangle crossing the midline, because the two
+sides are half a stride apart, so the chest and rump are interpolated and the
+weight fades out along the centre line. And the belly line sits below the
+rider's stirrups — set it too high and the boots swing with the legs.
+
+An entry can also carry a `banner`: a pole and a cloth pennant that waves,
+placed in rig space, for imported riders that come holding nothing but a sword.
 
 Models need preparing for the web before they go in here. The horse started as
 a 57 MB, 1.07-million-vertex scan, which would have taken minutes to load on a

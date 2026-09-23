@@ -17,19 +17,6 @@ import { EffectComposer } from './vendor/three/postprocessing/EffectComposer.js'
 import { RenderPass } from './vendor/three/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from './vendor/three/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from './vendor/three/postprocessing/OutputPass.js';
-import { GLTFLoader } from './vendor/three/loaders/GLTFLoader.js';
-import { articulateDetailedHorse, createSunsetLandscape, createArrivalMist } from './horse-motion.js';
-
-// The anatomical morph-target mesh supplies the actual gallop. Armour,
-// carriage, wings and lighting remain live Three.js geometry.
-let detailedHorseAsset = null;
-function horseAsset() {
-  // Both the rider and rath need the same model. Fetch and decode it once,
-  // then give each rig a detached scene clone; this removes the first-click
-  // network/decode hitch without sharing transform state between entrances.
-  detailedHorseAsset ??= new GLTFLoader().loadAsync('assets/models/horse-anatomy.glb');
-  return detailedHorseAsset.then((asset) => ({ ...asset, scene: asset.scene.clone(true) }));
-}
 
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const lerp = (a, b, t) => a + (b - a) * t;
@@ -290,16 +277,11 @@ function buildMaterials() {
   const grain = () => ({ roughnessMap: TEX.grainRough, normalMap: TEX.grainNormal, normalScale: new THREE.Vector2(0.45, 0.45) });
   MAT.gold = std({ color: 0xf0b444, metalness: 1, roughness: 0.3, emissive: 0x190d00, envMapIntensity: 1.5, ...metal() });
   MAT.goldDeep = std({ color: 0xd08c2a, metalness: 1, roughness: 0.44, emissive: 0x1d0e00, envMapIntensity: 1.7, ...metal() });
-  MAT.coachIvory = new THREE.MeshPhysicalMaterial({ color: 0xdb9f37, metalness: 0.72, roughness: 0.29, clearcoat: 0.65, clearcoatRoughness: 0.24, envMapIntensity: 1.05 });
-  MAT.coachGold = new THREE.MeshPhysicalMaterial({ color: 0xc99335, metalness: 0.92, roughness: 0.3, clearcoat: 0.5, clearcoatRoughness: 0.2, envMapIntensity: 1.5 });
   MAT.silver = std({ color: 0xc8d2e8, metalness: 1, roughness: 0.32, envMapIntensity: 1.5, ...metal() });
   MAT.steel = std({ color: 0x7c88a4, metalness: 1, roughness: 0.48, envMapIntensity: 1.2, ...metal() });
   MAT.dark = std({ color: 0x1b2038, metalness: 0.7, roughness: 0.6, envMapIntensity: 1.1, ...grain() });
-  MAT.wood = std({ color: 0x4d2414, metalness: 0.04, roughness: 0.48, envMapIntensity: 0.55, ...grain() });
-  MAT.leather = std({ color: 0x3a1a12, metalness: 0.04, roughness: 0.72, envMapIntensity: 0.35, ...grain() });
-  MAT.iron = std({ color: 0x252b34, metalness: 0.82, roughness: 0.42, envMapIntensity: 1.2, ...metal() });
-  MAT.coat = std({ color: 0xc8c4b9, metalness: 0.02, roughness: 0.62, envMapIntensity: 0.65, ...fur() });
-  MAT.coatWarm = std({ color: 0x6b3019, metalness: 0.04, roughness: 0.51, envMapIntensity: 1.05, ...fur() });
+  MAT.coat = std({ color: 0xcfc6b6, metalness: 0.04, roughness: 0.74, envMapIntensity: 0.6, ...fur() });
+  MAT.coatWarm = std({ color: 0x5d3418, metalness: 0.08, roughness: 0.72, envMapIntensity: 0.85, ...fur() });
   MAT.hoof = std({ color: 0x2a2233, metalness: 0.35, roughness: 0.62, ...grain() });
   MAT.mane = std({ color: 0x2c1d14, metalness: 0.15, roughness: 0.66, emissive: 0x160c04, envMapIntensity: 1.1, ...fur() });
   MAT.glass = std({ color: 0x1d7d76, metalness: 0.2, roughness: 0.08, emissive: 0x0d5750, emissiveIntensity: 1.5, transparent: true, opacity: 0.86 });
@@ -360,15 +342,9 @@ function buildLeg({ coat = MAT.coat, thigh = 0.5, shank = 0.5, thick = 0.15 } = 
 /** Drives one leg through a gallop cycle. `phase` staggers the four legs. */
 function galloped(leg, t, phase, amount = 1) {
   const a = t + phase;
-  // A horse places the hoof under the body before pushing back, then folds
-  // the lower leg only while it is off the ground.  Separating those phases
-  // stops the simple pendulum motion that makes a gallop look mechanical.
-  const stride = Math.sin(a);
-  const airborne = Math.max(0, stride);
-  const landing = Math.max(0, -stride);
-  leg.hip.rotation.z = stride * 0.78 * amount;
-  leg.knee.rotation.z = (-0.1 - airborne * 1.05 + landing * 0.16) * amount;
-  leg.ankle.rotation.z = (-0.06 + Math.sin(a - 0.72) * 0.24 + airborne * 0.19) * amount;
+  leg.hip.rotation.z = Math.sin(a) * 0.95 * amount;
+  leg.knee.rotation.z = -(0.18 + Math.max(0, Math.sin(a - 1.05)) * 1.25) * amount;
+  leg.ankle.rotation.z = Math.sin(a - 1.7) * 0.4 * amount;
 }
 
 /** A tapered chain (tail, whisker of mane, dragon spine offshoot). */
@@ -395,7 +371,6 @@ function buildChain(segments, radius, length, mat, taper = 0.72) {
 function buildFeatherWing(side, { span = 2.0, rows = 3, per = 8, mat = MAT.feather } = {}) {
   const root = group();
   const mid = group();
-  const feathers = [];
   root.add(mid);
   const shoulder = mesh(new THREE.CapsuleGeometry(0.075, span * 0.3, 4, 8), mat, 0.12, 0.2, side * 0.1);
   shoulder.rotation.z = 0.9;
@@ -405,33 +380,19 @@ function buildFeatherWing(side, { span = 2.0, rows = 3, per = 8, mat = MAT.feath
     const rowScale = 0.5 + r * 0.28;
     for (let i = 0; i < per; i++) {
       const k = i / (per - 1);
-      const theta = lerp(1.55, 0.38, k);            // raised leading edge, swept primary feathers
+      const theta = lerp(1.22, -0.08, k);            // up at the leading edge, swept back at the tip
       const len = span * rowScale * lerp(0.55, 1, Math.sin(Math.PI * (0.18 + 0.72 * k)));
       const pivot = group(0.05 + r * 0.06, 0.1, side * (0.08 + r * 0.09));
       pivot.rotation.z = theta;
       pivot.rotation.y = side * (0.1 + k * 0.28);
-      // A tapered vane with a raised central shaft and a curved tip. Capsules
-      // made the wings look like a fan of plastic fingers.
-      const vane = new THREE.PlaneGeometry(1, 1, 16, 6);
-      const points = vane.attributes.position;
-      for (let n=0;n<points.count;n++) {
-        const u=points.getX(n)+0.5, v=points.getY(n)*2;
-        const width=(0.12-r*0.012)*Math.pow(Math.sin(Math.PI*u),0.65);
-        points.setXYZ(n,u*len,v*width,0.038*(1-Math.abs(v))*Math.sin(Math.PI*u)+u*u*0.08);
-      }
-      vane.computeVertexNormals();
-      const feather = mesh(vane, mat);
+      const feather = mesh(new THREE.CapsuleGeometry(0.125 - r * 0.018, len * 0.84, 4, 10), mat, len / 2, 0, 0);
+      feather.rotation.z = Math.PI / 2;
+      feather.scale.set(1, 1, 0.22);                 // flatten each feather into a blade
       pivot.add(feather);
-      // The exposed central shaft catches a thinner highlight than the vane.
-      // It gives the long flight feathers their individual structure.
-      const shaft = mesh(new THREE.CylinderGeometry(0.009, 0.013, len * 0.96, 6), MAT.coachIvory, len * 0.47, 0, 0.012);
-      shaft.rotation.z = Math.PI / 2;
-      pivot.add(shaft);
       mid.add(pivot);
-      feathers.push({ pivot, row: r, k, restZ: theta, restY: side * (0.1 + k * 0.28) });
     }
   }
-  return { root, mid, feathers };
+  return { root, mid };
 }
 
 /**
@@ -520,12 +481,12 @@ function buildRider({ armour = MAT.steel, cloth = MAT.crimson, lean = 0 } = {}) 
   const torso = group();
   r.add(torso);
   torso.rotation.z = lean;
-  torso.add(mesh(new THREE.CapsuleGeometry(0.225, 0.44, 6, 18), armour, 0, 0.24, 0));
-  const chest = mesh(new THREE.SphereGeometry(0.255, 24, 18), armour, -0.01, 0.35, 0);
-  chest.scale.set(1.2, 0.98, 1.08);
+  torso.add(mesh(new THREE.CapsuleGeometry(0.2, 0.42, 4, 12), armour, 0, 0.24, 0));
+  const chest = mesh(new THREE.SphereGeometry(0.235, 16, 12), armour, -0.01, 0.34, 0);
+  chest.scale.set(1.12, 0.95, 1.02);
   torso.add(chest);
   const pauldrons = pair((side) => {
-    const p = mesh(new THREE.SphereGeometry(0.155, 18, 14, 0, Math.PI * 2, 0, Math.PI * 0.62), armour, 0, 0.47, side * 0.245);
+    const p = mesh(new THREE.SphereGeometry(0.13, 12, 10, 0, Math.PI * 2, 0, Math.PI * 0.6), MAT.gold, 0, 0.46, side * 0.21);
     p.rotation.z = -side * 0.1;
     torso.add(p);
     return p;
@@ -540,62 +501,37 @@ function buildRider({ armour = MAT.steel, cloth = MAT.crimson, lean = 0 } = {}) 
   // Head + plumed helm
   const neck = group(0, 0.52, 0);
   torso.add(neck);
-  neck.add(mesh(new THREE.CylinderGeometry(0.13, 0.12, 0.21, 16), armour, 0, 0.1, 0));
-  const helm = mesh(new THREE.SphereGeometry(0.16, 24, 18, 0, Math.PI * 2, 0, Math.PI * 0.62), armour, 0, 0.16, 0);
+  neck.add(mesh(new THREE.SphereGeometry(0.135, 14, 12), MAT.coatWarm, 0, 0.1, 0));
+  const helm = mesh(new THREE.SphereGeometry(0.16, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.62), armour, 0, 0.13, 0);
   neck.add(helm);
-  const visor = mesh(new THREE.BoxGeometry(0.018, 0.031, 0.235), MAT.dark, -0.135, 0.17, 0);
-  neck.add(visor);
-  neck.add(mesh(new THREE.BoxGeometry(0.035, 0.18, 0.027), MAT.silver, -0.149, 0.1, 0));
-  // Raised breastplate seams, gauntlets and overlapping waist armour.
-  for (let i = 0; i < 4; i++) {
-    const lamella = mesh(new THREE.TorusGeometry(.18 + i * .005, .024, 8, 24, Math.PI * 1.65), armour, 0, .11 - i * .056, 0);
-    lamella.rotation.x = Math.PI / 2;
-    torso.add(lamella);
-  }
-  torso.add(mesh(new THREE.BoxGeometry(.03, .3, .025), MAT.silver, -.235, .32, 0));
-  const belt = mesh(new THREE.TorusGeometry(.205, .035, 10, 28), MAT.dark, 0, .02, 0);
-  belt.rotation.x = Math.PI / 2;
-  belt.scale.z = .76;
-  torso.add(belt);
-  for (const side of [-1, 1]) {
-    const tasset = mesh(new THREE.BoxGeometry(.24, .34, .045), armour, .02, -.19, side * .13);
-    tasset.rotation.z = side * .05;
-    torso.add(tasset);
-  }
+  neck.add(mesh(new THREE.ConeGeometry(0.05, 0.3, 8), cloth, 0.02, 0.34, 0));
   // Arms — the outer one is raised, matching the salute in the reference.
   const arms = pair((side) => {
     const shoulder = group(0, 0.42, side * 0.21);
-    const upper = mesh(new THREE.CapsuleGeometry(0.082, 0.3, 5, 12), armour, 0, -0.17, 0);
+    const upper = mesh(new THREE.CapsuleGeometry(0.068, 0.3, 3, 8), armour, 0, -0.17, 0);
     shoulder.add(upper);
     const elbow = group(0, -0.34, 0);
     shoulder.add(elbow);
-    elbow.add(mesh(new THREE.CapsuleGeometry(0.067, 0.28, 5, 12), armour, 0, -0.16, 0));
-    elbow.add(mesh(new THREE.SphereGeometry(.075, 12, 10), armour, 0, -.31, 0));
+    elbow.add(mesh(new THREE.CapsuleGeometry(0.058, 0.28, 3, 8), armour, 0, -0.16, 0));
     torso.add(shoulder);
     return { shoulder, elbow, side };
   });
-  // Upright silver sword, as in the reference (the bike hides this group).
+  // Raised banner in the near hand.
   const banner = group(0, -0.28, 0);
-  banner.rotation.z = 2.63;
-  banner.add(mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.19, 10), MAT.dark, 0, .03, 0));
-  banner.add(mesh(new THREE.BoxGeometry(.28, .035, .04), MAT.gold, 0, .14, 0));
-  const blade = mesh(new THREE.BoxGeometry(.058, .94, .017), MAT.silver, 0, .63, 0);
-  banner.add(blade);
-  banner.add(mesh(new THREE.ConeGeometry(.034, .18, 4), MAT.silver, 0, 1.19, 0));
-  banner.add(mesh(new THREE.SphereGeometry(.035, 10, 8), MAT.gold, 0, -.085, 0));
+  banner.add(mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.95, 8), MAT.gold, 0, 0.38, 0));
+  banner.add(mesh(new THREE.ConeGeometry(0.035, 0.14, 7), MAT.gold, 0, 0.92, 0));
   const flagGeo = new THREE.PlaneGeometry(0.34, 0.22, 8, 3);
   const flag = mesh(flagGeo, new THREE.MeshStandardMaterial({ color: 0xc8203f, emissive: 0x38040d, roughness: 0.55, metalness: 0.2, side: THREE.DoubleSide }), -0.18, 0.7, 0);
   banner.add(flag);
-  flag.visible = false;
   arms[0].elbow.add(banner);
   // Legs
   const legs = pair((side) => {
     const hip = group(0, 0.02, side * 0.14);
-    hip.add(mesh(new THREE.CapsuleGeometry(0.1, 0.31, 5, 12), armour, 0, -0.18, 0));
+    hip.add(mesh(new THREE.CapsuleGeometry(0.085, 0.3, 3, 8), MAT.dark, 0, -0.18, 0));
     const knee = group(0, -0.36, 0);
     hip.add(knee);
-    knee.add(mesh(new THREE.CapsuleGeometry(0.082, 0.29, 5, 12), armour, 0, -0.16, 0));
-    knee.add(mesh(new THREE.BoxGeometry(0.25, 0.11, 0.15), MAT.dark, -0.06, -0.34, 0));
+    knee.add(mesh(new THREE.CapsuleGeometry(0.07, 0.28, 3, 8), MAT.dark, 0, -0.16, 0));
+    knee.add(mesh(new THREE.BoxGeometry(0.22, 0.09, 0.12), MAT.dark, -0.05, -0.33, 0));
     torso.add(hip);
     return { hip, knee };
   });
@@ -607,7 +543,7 @@ function buildRider({ armour = MAT.steel, cloth = MAT.crimson, lean = 0 } = {}) 
  * which is the direction every entrance travels across the stage.
  * ------------------------------------------------------------------ */
 
-function buildHorse({ coat = MAT.coat, winged = false, rider = true, scale = 1, detailed = true } = {}) {
+function buildHorse({ coat = MAT.coat, winged = false, rider = true, scale = 1 } = {}) {
   const root = group();
   const body = group();
   root.add(body);
@@ -695,9 +631,9 @@ function buildHorse({ coat = MAT.coat, winged = false, rider = true, scale = 1, 
     man = buildRider({ lean: -0.1 });
     man.root.position.set(0.02, 0.5, 0);
     body.add(man.root);
-    man.arms[0].shoulder.rotation.z = -2.8;
-    man.arms[0].shoulder.rotation.x = -0.15;
-    man.arms[0].elbow.rotation.z = 0.25;
+    man.arms[0].shoulder.rotation.z = 2.3;
+    man.arms[0].shoulder.rotation.x = -0.35;
+    man.arms[0].elbow.rotation.z = -0.5;
     man.arms[1].shoulder.rotation.z = -0.9;
     man.arms[1].elbow.rotation.z = -0.7;
     man.legs.forEach((l) => { l.hip.rotation.z = -0.95; l.knee.rotation.z = 0.85; });
@@ -705,116 +641,11 @@ function buildHorse({ coat = MAT.coat, winged = false, rider = true, scale = 1, 
 
   root.scale.setScalar(scale);
 
-  let morphMixer = null, previousTime = 0, anatomicalRig = null, anatomyCarrier = null, anatomyMotion = null;
-  let gaitClock = 0, gaitPreviousTime = 0;
-  // The scan is ideal for the rider entrance.  The winged rath uses this
-  // fully connected procedural body so its shoulders, wings and harness all
-  // share one coordinate system instead of drifting apart on small screens.
-  const ready = detailed ? horseAsset().then((asset) => {
-    // Keep the authored scene transforms intact. Fit a detached wrapper so
-    // fitting never depends on the parent carriage's scale or current pose.
-    const anatomy = new THREE.Group();
-    anatomy.add(asset.scene);
-    asset.scene.rotation.y = -Math.PI / 2;
-    anatomy.updateMatrixWorld(true);
-    const box = new THREE.Box3().setFromObject(anatomy);
-    const size = box.getSize(new THREE.Vector3());
-    const center = box.getCenter(new THREE.Vector3());
-    // Normalise against the animal's longest horizontal axis. Some GLBs face
-    // +X and others +Z; using only X can make a rotated horse enormous.
-    const factor = 3.5 / Math.max(size.x, size.z);
-    const anatomyScale = factor;
-    anatomy.scale.setScalar(anatomyScale);
-    anatomy.position.set(-center.x * anatomyScale, -1.18 - box.min.y * anatomyScale, 0);
-    anatomyCarrier = anatomy;
-    anatomy.traverse((part) => {
-      if (!part.isMesh) return;
-      part.geometry = part.geometry.clone();
-      const original = part.material.name;
-      part.material = coat.clone();
-      if (/Eye_Black/i.test(original)) {
-        part.material.color.setHex(0x090a0e); part.material.roughness=.12;
-      } else if (/Eye_White/i.test(original)) {
-        part.material.color.setHex(0x918779);
-      } else if (/Hooves/i.test(original)) {
-        part.material.color.setHex(winged ? 0x9f7850 : 0x282329); part.material.roughness=.48;
-      } else if (/Hair/i.test(original)) {
-        part.material.color.setHex(winged ? 0xa17e35 : 0x201612); part.material.roughness=.68;
-      } else if (/Muzzle/i.test(original)) {
-        part.material.color.setHex(winged ? 0x83756b : 0x39251f);
-      } else if (/Main_Dark/i.test(original)) {
-        part.material.color.setHex(winged ? 0xaaa79f : 0x592615);
-      }
-      part.material.metalness=.025;
-      part.material.normalScale.setScalar(.08);
-      part.frustumCulled=false;
-      part.castShadow = part.receiveShadow = true;
-    });
-    body.children.forEach((part) => {
-      if (part !== man?.root && !wings?.some((w) => w.root === part)) part.visible = false;
-    });
-    root.add(anatomy);
-    if (winged) {
-      const face = group();
-      const eyeMaterial = new THREE.MeshPhysicalMaterial({color:0x070706,roughness:.12,clearcoat:1});
-      for (const side of [-1,1]) {
-        face.add(mesh(new THREE.SphereGeometry(.029,12,10),eyeMaterial,-.10,.035,side*.12));
-        face.add(mesh(new THREE.SphereGeometry(.008,8,6),MAT.silver,-.107,.045,side*.143));
-        const cheekStrap=mesh(new THREE.CapsuleGeometry(.012,.26,3,8),MAT.goldDeep,-.12,-.035,side*.12);
-        cheekStrap.rotation.z=-.35; face.add(cheekStrap);
-        const bit=mesh(new THREE.TorusGeometry(.041,.009,6,18),MAT.gold,-.19,-.17,side*.13);
-        face.add(bit);
-      }
-      root.add(face);
-      const collar=mesh(new THREE.TorusGeometry(.27,.022,8,36),MAT.coachGold);
-      collar.rotation.y=Math.PI/2;collar.rotation.z=-.5;root.add(collar);
-      anatomicalRig={head:asset.scene.getObjectByName('Head'),shoulder:asset.scene.getObjectByName('Neck1'),face,collar,position:new THREE.Vector3()};
-    }
-    if (man) {
-      man.root.position.set(-.08, .30, 0);
-      man.root.scale.setScalar(1.08);
-      const saddle = mesh(new THREE.SphereGeometry(.32, 20, 12), MAT.dark, -.1, .18, 0);
-      saddle.scale.set(1.05, .24, .94);
-      body.add(saddle);
-    }
-    if (asset.animations.length) {
-      morphMixer = new THREE.AnimationMixer(asset.scene);
-      const gallop = THREE.AnimationClip.findByName(asset.animations, 'Gallop') || asset.animations.find((clip) => /gallop$/i.test(clip.name)) || asset.animations[0];
-      morphMixer.clipAction(gallop).setDuration(.72).play();
-    } else {
-      // The detailed draught horse has no baked clip.  Articulate its actual
-      // mesh so the legs, neck and tail keep moving beneath the live wings.
-      anatomyMotion = articulateDetailedHorse(asset.scene);
-    }
-    return true;
-  }).catch((error) => { console.warn('Animated horse unavailable; using articulated fallback.', error); return false; }) : Promise.resolve(false);
-
   return {
-    root, body, head, neck, wings, rider: man, ready,
+    root, body, head, neck, wings, rider: man,
     update(t, u, ctx = {}) {
-      const pace = ctx.pace ?? 1;
-      if (morphMixer) {
-        if (t < previousTime) morphMixer.setTime(0);
-        morphMixer.update(Math.min(Math.max(t - previousTime, 0), .075) * pace);
-        previousTime = t;
-      }
-      anatomyMotion?.update(t, anatomyCarrier, pace);
-      if (anatomicalRig) {
-        // Keep the face details and wing roots attached to the animated animal,
-        // including when its neck rises during the stride.
-        root.updateMatrixWorld(true);
-        const rig=anatomicalRig;
-        rig.face.position.copy(root.worldToLocal(rig.head.getWorldPosition(rig.position)));
-        rig.collar.position.copy(root.worldToLocal(rig.shoulder.getWorldPosition(rig.position)));
-        for (const wing of wings) {
-          const shoulder=body.worldToLocal(rig.shoulder.getWorldPosition(rig.position));
-          wing.root.position.copy(shoulder).add(new THREE.Vector3(.25,.02,wing.side*.21));
-        }
-      }
-      if (t < gaitPreviousTime) gaitClock = 0;
-      gaitClock += Math.min(Math.max(t - gaitPreviousTime, 0), .08) * (ctx.speed ?? 9.5) * pace;
-      gaitPreviousTime = t;
-      const gait = gaitClock;
+      const speed = ctx.speed ?? 9.5;
+      const gait = t * speed;
       legs.forEach(({ leg, phase }) => galloped(leg, gait, phase, ctx.gait ?? 1));
       // Suspension bounce and the pitch of a horse at full stretch.
       body.position.y = Math.sin(gait * 2) * 0.1 + Math.abs(Math.sin(gait)) * 0.05;
@@ -830,33 +661,19 @@ function buildHorse({ coat = MAT.coat, winged = false, rider = true, scale = 1, 
         j.rotation.y = Math.sin(gait * 0.9 - i * 0.42) * 0.2;
       });
       if (wings) {
-        // The whole wing drives the broad stroke while every feather receives
-        // a delayed breeze ripple.  The delay travels from the covered base
-        // towards the long primaries, like a real wing flexing in the air.
-        const beat = gaitClock * (ctx.wingRate ?? 0.42);
-        const flap = Math.sin(beat);
-        const downstroke = Math.max(0, flap);
-        const idleBreeze = Math.sin(t * 2.35);
+        const flap = Math.sin(t * 4.4);
         wings.forEach((w) => {
-          w.root.rotation.x = w.side * (0.16 + flap * 0.42 + idleBreeze * 0.025);
-          w.root.rotation.z = -0.04 + flap * 0.13;
-          w.mid.rotation.x = -w.side * (0.15 + flap * 0.36);
-          w.mid.rotation.y = w.side * (0.08 + flap * 0.16 + idleBreeze * 0.028);
-          w.feathers.forEach((f) => {
-            const primary = f.row / 2;
-            const ripple = Math.sin(t * 4.8 - f.k * 5.4 - f.row * 0.72);
-            const flex = downstroke * (0.08 + primary * 0.22) + ripple * (0.014 + primary * 0.052);
-            f.pivot.rotation.z = f.restZ - flex;
-            f.pivot.rotation.y = f.restY + w.side * (downstroke * (0.04 + primary * 0.12) + ripple * (0.012 + primary * 0.045));
-            f.pivot.rotation.x = w.side * ripple * (0.018 + primary * 0.055);
-          });
+          w.root.rotation.x = w.side * (0.3 + flap * 0.5);
+          w.root.rotation.z = flap * 0.16;
+          w.mid.rotation.x = -w.side * (0.08 + flap * 0.24);
+          w.mid.rotation.y = w.side * flap * 0.12;
         });
       }
       if (man) {
         man.torso.rotation.z = -0.1 + Math.sin(gait * 2 + 0.3) * 0.07;
         man.torso.position.y = Math.sin(gait * 2) * 0.04;
         man.neck.rotation.z = Math.sin(gait * 2 + 1) * 0.05;
-        man.arms[0].shoulder.rotation.z = -2.8 + Math.sin(gait * 1.4) * 0.04;
+        man.arms[0].shoulder.rotation.z = 2.3 + Math.sin(gait * 1.4) * 0.14;
         man.cape.rotation.z = -0.5 - Math.sin(gait * 1.3) * 0.25;
         man.cape.rotation.y = Math.sin(gait * 1.1) * 0.2;
         const pos = man.flagGeo.attributes.position;
@@ -892,7 +709,6 @@ function buildCarriage() {
 
   // --- Coach -------------------------------------------------------
   const coach = group(1.55, 0.05, 0);
-  coach.scale.set(1.04, .87, 1);
   root.add(coach);
 
   const profile = new THREE.Shape();
@@ -907,7 +723,7 @@ function buildCarriage() {
   profile.closePath();
   const cabin = mesh(new THREE.ExtrudeGeometry(profile, {
     depth: 1.02, bevelEnabled: true, bevelSize: 0.08, bevelThickness: 0.08, bevelSegments: 3, curveSegments: 16
-  }), MAT.coachIvory, 0, 0.5, -0.51);
+  }), MAT.gold, 0, 0.5, -0.51);
   coach.add(cabin);
 
   // Arched windows on both flanks, each with its own gold surround.
@@ -920,18 +736,7 @@ function buildCarriage() {
   arch.closePath();
   const paneGeo = new THREE.ExtrudeGeometry(arch, { depth: 0.05, bevelEnabled: false, curveSegments: 14 });
   [[-0.33, 1], [0.33, 1], [-0.33, -1], [0.33, -1]].forEach(([px, side]) => {
-    const paneMaterial = MAT.glass.clone();
-    paneMaterial.color.setHex(0x123b3c);
-    paneMaterial.emissive.setHex(0x061c20);
-    paneMaterial.emissiveIntensity = .55;
-    paneMaterial.transparent = false;
-    paneMaterial.opacity = 1;
-    paneMaterial.metalness = .38;
-    paneMaterial.roughness = .16;
-    paneMaterial.envMapIntensity = .45;
-    const pane = mesh(paneGeo, paneMaterial, px, 0.93, side * 0.60);
-    pane.scale.y = 1.2;
-    coach.add(pane);
+    coach.add(mesh(paneGeo, MAT.glass, px, 0.72, side * 0.56));
     const surroundShape = new THREE.Shape();
     surroundShape.moveTo(-0.3, -0.36);
     surroundShape.lineTo(0.3, -0.36);
@@ -941,8 +746,7 @@ function buildCarriage() {
     surroundShape.closePath();
     surroundShape.holes.push(new THREE.Path(arch.getPoints(24)));
     const surround = mesh(new THREE.ExtrudeGeometry(surroundShape, { depth: 0.04, bevelEnabled: false, curveSegments: 14 }),
-      MAT.coachGold, px, 0.93, side * 0.625);
-    surround.scale.y = 1.2;
+      MAT.goldDeep, px, 0.72, side * 0.585);
     coach.add(surround);
   });
   // Door seam and handle on the near flank.
@@ -952,25 +756,6 @@ function buildCarriage() {
   // Driver's bench at the front of the coach.
   coach.add(mesh(new THREE.BoxGeometry(0.42, 0.1, 0.8), MAT.goldDeep, -1.02, 0.78, 0));
   coach.add(mesh(new THREE.BoxGeometry(0.1, 0.34, 0.8), MAT.gold, -1.2, 0.94, 0));
-  // A visible coachman gives the rath a believable scale and a clear source
-  // for the reins instead of making it look like an empty display carriage.
-  const coachman = group(-1.12, 1.08, 0);
-  const coat = mesh(new THREE.CapsuleGeometry(0.16, 0.38, 5, 14), MAT.dark, 0, 0.16, 0);
-  coat.scale.z = 1.25;
-  coachman.add(coat);
-  coachman.add(mesh(new THREE.SphereGeometry(0.13, 16, 12), new THREE.MeshStandardMaterial({ color: 0x8b5438, roughness: 0.66 }), -0.04, 0.54, 0));
-  const hat = mesh(new THREE.CylinderGeometry(0.17, 0.15, 0.12, 16), MAT.dark, -0.04, 0.67, 0);
-  hat.rotation.z = Math.PI / 2;
-  coachman.add(hat);
-  coachman.add(mesh(new THREE.CylinderGeometry(0.23, 0.23, 0.024, 18), MAT.dark, -0.04, 0.62, 0).rotateX(Math.PI / 2));
-  for (const side of [-1, 1]) {
-    const arm = group(-0.05, 0.34, side * 0.13);
-    arm.rotation.z = -0.76;
-    arm.add(mesh(new THREE.CapsuleGeometry(0.048, 0.3, 4, 10), MAT.dark, 0, -0.15, 0));
-    arm.add(mesh(new THREE.SphereGeometry(0.052, 10, 8), new THREE.MeshStandardMaterial({ color: 0x8b5438, roughness: 0.7 }), -0.22, -0.25, 0));
-    coachman.add(arm);
-  }
-  coach.add(coachman);
 
   // Gold trim: a waist rail and a roof rail around the cabin.
   [0.12, 1.02].forEach((y, i) => {
@@ -981,14 +766,7 @@ function buildCarriage() {
   });
 
   // Crown finial and corner spires.
-  const dome = mesh(new THREE.SphereGeometry(1, 40, 24, 0, Math.PI * 2, 0, Math.PI / 2), MAT.coachIvory, 0, 1.57, 0);
-  dome.scale.set(1.04, .39, .70);
-  coach.add(dome);
-  const eave = mesh(new THREE.TorusGeometry(1, .04, 10, 48), MAT.goldDeep, 0, 1.59, 0);
-  eave.rotation.x = Math.PI / 2;
-  eave.scale.y = .69;
-  coach.add(eave);
-  const crown = group(0, 1.98, 0);
+  const crown = group(0, 1.14, 0);
   coach.add(crown);
   crown.add(mesh(new THREE.CylinderGeometry(0.16, 0.2, 0.1, 12), MAT.gold));
   for (let i = 0; i < 6; i++) {
@@ -999,17 +777,6 @@ function buildCarriage() {
     crown.add(spike);
   }
   crown.add(mesh(new THREE.SphereGeometry(0.07, 12, 10), MAT.amber, 0, 0.28, 0));
-  pair((side) => {
-    [-.81, 0, .81].forEach((x) => {
-      coach.add(mesh(new THREE.CylinderGeometry(.035, .045, .93, 12), MAT.gold, x, .94, side * .64));
-      coach.add(mesh(new THREE.SphereGeometry(.055, 12, 10), MAT.gold, x, 1.45, side * .64));
-    });
-    for (let i = 0; i < 9; i++) {
-      const scroll = mesh(new THREE.TorusGeometry(.092, .014, 6, 18, Math.PI * 1.7), MAT.goldDeep, -.73 + i * .18, .20, side * .60);
-      scroll.rotation.z = i % 2 ? Math.PI : 0;
-      coach.add(scroll);
-    }
-  });
 
   // Lanterns
   const lanterns = pair((side) => {
@@ -1028,9 +795,7 @@ function buildCarriage() {
   const wheels = [];
   [[-0.66, 0.42], [0.72, 0.62]].forEach(([wx, r]) => {
     pair((side) => {
-      // Dark iron tyres, wooden rims and brass hubs read as a working rath,
-      // while the prior all-gold wheels looked like stationary ornament.
-      const w = buildWheel({ radius: r, spokes: r > 0.5 ? 14 : 10, rim: MAT.wood, band: MAT.iron, hub: MAT.coachGold });
+      const w = buildWheel({ radius: r, spokes: r > 0.5 ? 14 : 10 });
       w.position.set(wx, -0.55 + r - 0.42, side * 0.62);
       coach.add(w);
       wheels.push(w);
@@ -1040,12 +805,8 @@ function buildCarriage() {
   });
 
   // --- Draught pegasus --------------------------------------------
-  const horse = buildHorse({ coat: MAT.coat, winged: true, rider: false, scale: .72, detailed: false });
-  horse.root.position.set(-1.38, 0.20, 0);
-  horse.wings?.forEach((wing) => {
-    wing.root.scale.setScalar(.95);
-    wing.root.position.set(-.20, .28, wing.side * .23);
-  });
+  const horse = buildHorse({ coat: MAT.coat, winged: true, rider: false, scale: 1 });
+  horse.root.position.set(-0.85, 0.46, 0);
   root.add(horse.root);
 
   // Shafts and traces from the coach to the harness.
@@ -1055,55 +816,20 @@ function buildCarriage() {
     root.add(shaft);
     return shaft;
   });
-  // The visible collar follows the animated neck inside buildHorse.
-
-  // Curved leather traces, sprung chassis and wrought roof ribs follow the
-  // horse and coach proportions instead of floating between the two rigs.
-  const tube = (parent, vertices, radius, material) => {
-    const curve = new THREE.CatmullRomCurve3(vertices.map(v=>new THREE.Vector3(...v)));
-    parent.add(mesh(new THREE.TubeGeometry(curve,32,radius,6,false),material));
-  };
-  const leather = new THREE.MeshStandardMaterial({color:0x58311b,roughness:.72});
-  for (const side of [-1,1]) {
-    tube(root,[[-1.86,.25,side*.23],[-1.0,-.02,side*.28],[-.1,.08,side*.38],[.51,.43,side*.4]],.012,leather);
-    // Separate reins rise from the coachman's hands to the bit.  Their soft
-    // curve makes the animal and carriage read as one connected rig.
-    tube(root,[[-1.92,.34,side*.15],[-1.22,.47,side*.18],[-.32,.7,side*.23],[.35,1.28,side*.18]],.01,MAT.leather);
-    tube(coach,[[-.96,-.40,side*.47],[-.55,-.59,side*.47],[0,-.52,side*.47],[.7,-.43,side*.47]],.023,MAT.goldDeep);
-    const spring = mesh(new THREE.TorusGeometry(.25,.018,6,20,Math.PI),MAT.iron,side*.1,-.44,side*.44);
-    spring.rotation.y=Math.PI/2;
-    coach.add(spring);
-    for(let rib=0;rib<5;rib++) {
-      const a=Math.PI*(rib/4);
-      const vertices=[];
-      for(let j=0;j<=12;j++) {
-        const t=j/12*Math.PI/2;
-        vertices.push([Math.cos(a)*Math.sin(t)*1.04,1.57+Math.cos(t)*.39,side*Math.sin(a)*Math.sin(t)*.71]);
-      }
-      tube(coach,vertices,.018,MAT.coachGold);
-    }
-    // Gold leaf scrollwork on the lower panels and a usable coach step.
-    for(let i=0;i<5;i++) {
-      const x=-.63+i*.32;
-      tube(coach,[[x-.11,.32,side*.64],[x-.04,.42,side*.66],[x,.32,side*.67],[x+.04,.42,side*.66],[x+.11,.32,side*.64]],.012,MAT.gold);
-    }
-    const step=mesh(new THREE.BoxGeometry(.52,.05,.22),MAT.dark,0,-.54,side*.73);
-    coach.add(step);
-    coach.add(mesh(new THREE.BoxGeometry(.54,.035,.025),MAT.coachGold,0,-.50,side*.85));
-  }
+  const harness = mesh(new THREE.TorusGeometry(0.42, 0.04, 8, 24), MAT.crimson, -1.35, 0.18, 0);
+  harness.rotation.y = Math.PI / 2;
+  harness.scale.set(1, 0.85, 1);
+  root.add(harness);
 
   root.position.x = -0.6;
 
   return {
-    root, horse, ready: horse.ready,
+    root, horse,
     update(t, u, ctx = {}) {
-      const pace = ctx.pace ?? 1;
-      horse.update(t, u, { speed: 7.4, gait: 0.72, pace, wingRate: 0.42 });
-      const roll = Math.sin(t * 7.4 * 2) * 0.014 * pace;
+      horse.update(t, u, { speed: 7.4, gait: 0.72 });
+      const roll = Math.sin(t * 7.4 * 2) * 0.02;
       coach.position.y = 0.05 + roll;
-      coach.rotation.z = roll * 0.5;
-      coachman.position.y = Math.sin(t * 7.4 * 2 + .4) * .012;
-      coachman.rotation.z = Math.sin(t * 7.4 + .4) * .018;
+      coach.rotation.z = roll * 0.7;
       const spin = -(ctx.travel ?? t * 2.2) * 2.4;
       wheels.forEach((w) => { w.rotation.z = spin; });
       lanterns.forEach(({ halo }, i) => {
@@ -1561,10 +1287,20 @@ const ENTRIES = {
     label: 'Horse rider',
     accent: 0xffa845,
     trail: { color: 0xff8a1e, width: 0.12, span: 0.09 },
-    scale: 1.2, y: -0.28,
+    scale: 0.95, y: -0.32,
     build: () => buildHorse({ coat: MAT.coatWarm, rider: true }),
     // assets/models/horse.glb faces +z, so a quarter turn puts it on the path.
-    model: { rotationY: -Math.PI / 2, length: 3.3, groundY: -1.45, cadence: 8.4 },
+    model: {
+      rotationY: -Math.PI / 2, length: 3.3, groundY: -1.45,
+      // Measured off the mesh: belly line, hip positions and the clean gap
+      // between fore and hind legs, all in the model's own +z-forward space.
+      gallop: {
+        belly: -0.64, legLength: 0.36, split: 0.10,
+        frontHipZ: 0.38, hindHipZ: -0.18, tailZ: -0.50,
+        speed: 9.0, swing: 0.95
+      },
+      banner: { x: 0.62, y: 0.0, z: 0.14, tilt: 0.48, scale: 0.62 }
+    },
     pool: 0xffa23c,
     path(u) {
       const x = crossing(u, 7.2, -7.6, 0.15, 0.3, 0.66, 0.5);
@@ -1580,7 +1316,7 @@ const ENTRIES = {
     label: 'Royal rath',
     accent: 0xe0a6ff,
     trail: { color: 0xc98bff, width: 0.14, span: 0.08 },
-    scale: 1.0, y: -0.42,
+    scale: 0.8, y: -0.42,
     build: () => buildCarriage(),
     pool: 0xd79bff,
     path(u) {
@@ -1649,11 +1385,8 @@ export function createEntryEngine(canvas, opts = {}) {
   buildMaterials();
 
   const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const mobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
   const lowPower = (navigator.hardwareConcurrency || 4) <= 4 || /Android [4-8]\./.test(navigator.userAgent);
-  // The stage is only phone-width; capping mobile render density avoids a
-  // costly 2x/3x offscreen bloom buffer without making its edges look soft.
-  const dpr = Math.min(window.devicePixelRatio || 1, lowPower || mobile ? 1.5 : 2);
+  const dpr = Math.min(window.devicePixelRatio || 1, lowPower ? 1.5 : 2);
 
   renderer.setPixelRatio(dpr);
   renderer.setClearAlpha(0);
@@ -1705,10 +1438,6 @@ export function createEntryEngine(canvas, opts = {}) {
   // --- Stage dressing ----------------------------------------------
   const stage = new THREE.Group();
   scene.add(stage);
-  const sunset = createSunsetLandscape();
-  stage.add(sunset.plane);
-  const mist = createArrivalMist();
-  stage.add(mist.plane);
 
   const pool = mesh(new THREE.PlaneGeometry(7.2, 3.4), additive(0xc79bff, 0.5, TEX.pool), 0, -1.86, 1.0);
   pool.rotation.x = -1.16;
@@ -1758,15 +1487,6 @@ export function createEntryEngine(canvas, opts = {}) {
   const composer = new EffectComposer(renderer);
   composer.addPass(new RenderPass(scene, camera));
   const bloom = new UnrealBloomPass(new THREE.Vector2(512, 512), lowPower ? 0.28 : 0.42, 0.5, 0.9);
-  // The stock blur writes alpha=1 over every pixel. Preserve the blurred
-  // alpha too, so the voice-room background shows through around the entry.
-  bloom.separableBlurMaterials.forEach((material) => {
-    material.fragmentShader = material.fragmentShader
-      .replace('vec3 diffuseSum = texture2D( colorTexture, vUv ).rgb * weightSum;', 'vec4 diffuseSum = texture2D( colorTexture, vUv ) * weightSum;')
-      .replace('vec3 sample1 = texture2D( colorTexture, vUv + uvOffset ).rgb;', 'vec4 sample1 = texture2D( colorTexture, vUv + uvOffset );')
-      .replace('vec3 sample2 = texture2D( colorTexture, vUv - uvOffset ).rgb;', 'vec4 sample2 = texture2D( colorTexture, vUv - uvOffset );')
-      .replace('vec4(diffuseSum/weightSum, 1.0)', 'diffuseSum/weightSum');
-  });
   composer.addPass(bloom);
   composer.addPass(new OutputPass());
 
@@ -1798,6 +1518,153 @@ export function createEntryEngine(canvas, opts = {}) {
     const entry = { cfg, rig, pivot, trail };
     rigs.set(name, entry);
     return entry;
+  }
+
+  /**
+   * Make a rigless quadruped gallop.
+   *
+   * Downloaded models almost never ship a skeleton, and a rigid mesh slid
+   * across the stage reads as a statue. Rather than fake a skeleton, the leg
+   * vertices are swung in the vertex shader: each is assigned to a leg by where
+   * it sits in the model's own space, weighted from zero at the hip to one at
+   * the hoof, and rotated about the hip, with a second rotation about the knee
+   * for the lower half. The weighting makes the limb bend rather than snap off,
+   * and the same rotation is applied to the normal so the shading follows. It
+   * costs one uniform per frame and no CPU work.
+   *
+   * `g` describes the animal in ITS OWN axes, before the model is turned onto
+   * the path: forward is +z, up is +y.
+   */
+  function applyGallopShader(model, g) {
+    const time = { value: 0 };
+    const glsl = [
+      'uniform float uT;',
+      `const float BELLY  = ${g.belly.toFixed(3)};`,
+      `const float LEGLEN = ${g.legLength.toFixed(3)};`,
+      `const float SPLIT  = ${g.split.toFixed(3)};`,
+      `const float FRONTZ = ${g.frontHipZ.toFixed(3)};`,
+      `const float HINDZ  = ${g.hindHipZ.toFixed(3)};`,
+      `const float TAILZ  = ${g.tailZ.toFixed(3)};`,
+      `const float SPEED  = ${g.speed.toFixed(3)};`,
+      `const float SWING  = ${g.swing.toFixed(3)};`,
+      '',
+      'vec3 rotX(vec3 v, float a) {',
+      '  float s = sin(a), c = cos(a);',
+      '  return vec3(v.x, v.y * c - v.z * s, v.y * s + v.z * c);',
+      '}',
+      '',
+      '// Rotate about a pivot lying on the z/y plane.',
+      'vec3 swingAbout(vec3 p, float pz, float py, float a) {',
+      '  vec3 piv = vec3(0.0, py, pz);',
+      '  return piv + rotX(p - piv, a);',
+      '}',
+      '',
+      '// Hip and knee angle for one leg at a given depth down the limb.',
+      'vec2 legAngles(float phase, float w) {',
+      '  float a = uT * SPEED + phase;',
+      '  return vec2(',
+      '    sin(a) * SWING * w,',
+      '    -(0.10 + max(0.0, sin(a - 1.05)) * 0.70) * clamp((w - 0.45) / 0.55, 0.0, 1.0)',
+      '  );',
+      '}',
+      '',
+      '// Blend between the four legs instead of branching between them. A hard',
+      '// left/right test tears every triangle that crosses the midline, because',
+      '// the two sides are half a stride apart; blending keeps the chest, belly',
+      '// and rump continuous, and the weight is faded out along the centre line',
+      '// so the body itself barely moves.',
+      'void gallopFor(vec3 rest, out vec2 ang, out float hipZ) {',
+      '  float w = clamp((BELLY - rest.y) / LEGLEN, 0.0, 1.0);',
+      '  w = w * w * (3.0 - 2.0 * w);',
+      '  w *= smoothstep(0.015, 0.085, abs(rest.x));',
+      '  float side = smoothstep(-0.055, 0.055, rest.x);',
+      '  float fore = smoothstep(SPLIT - 0.09, SPLIT + 0.09, rest.z);',
+      '  vec2 front = mix(legAngles(3.05, w), legAngles(0.00, w), side);',
+      '  vec2 hind  = mix(legAngles(0.75, w), legAngles(4.30, w), side);',
+      '  ang  = mix(hind, front, fore);',
+      '  hipZ = mix(HINDZ, FRONTZ, fore);',
+      '}',
+      '',
+      '// Total rotation a vertex receives, used to carry the normal along.',
+      'float gallopAngle(vec3 rest) {',
+      '  if (rest.y >= BELLY || rest.z < TAILZ) return 0.0;',
+      '  vec2 ang; float hipZ;',
+      '  gallopFor(rest, ang, hipZ);',
+      '  return ang.x + ang.y;',
+      '}',
+      '',
+      'vec3 gallop(vec3 pos, vec3 rest) {',
+      '  // Tail: a slow sweep hinged where it leaves the rump.',
+      '  if (rest.z < TAILZ) {',
+      '    float wt = clamp((TAILZ - rest.z) / 0.45, 0.0, 1.0);',
+      '    return swingAbout(pos, TAILZ, BELLY + 0.18, sin(uT * SPEED * 0.42) * 0.22 * wt);',
+      '  }',
+      '  if (rest.y >= BELLY) return pos;',
+      '  vec2 ang; float hipZ;',
+      '  gallopFor(rest, ang, hipZ);',
+      '  // Knee bends in the rest pose, then the hip carries the whole limb.',
+      '  vec3 q = swingAbout(pos, hipZ, BELLY - LEGLEN * 0.5, ang.y);',
+      '  return swingAbout(q, hipZ, BELLY, ang.x);',
+      '}'
+    ].join('\n');
+
+    const inject = (shader, withNormal) => {
+      shader.uniforms.uT = time;
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\n' + glsl)
+        .replace('#include <begin_vertex>',
+          '#include <begin_vertex>\n transformed = gallop(transformed, position);');
+      if (withNormal) {
+        shader.vertexShader = shader.vertexShader.replace('#include <beginnormal_vertex>',
+          '#include <beginnormal_vertex>\n objectNormal = rotX(objectNormal, gallopAngle(position));');
+      }
+    };
+
+    model.traverse((o) => {
+      if (!o.isMesh) return;
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      mats.forEach((m) => {
+        if (!m || m.userData.gallop) return;
+        m.userData.gallop = true;
+        m.onBeforeCompile = (shader) => inject(shader, true);
+        m.needsUpdate = true;
+      });
+      // The shadow pass renders with its own depth material, which would
+      // otherwise cast the rest pose while the visible mesh gallops.
+      const depth = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
+      depth.onBeforeCompile = (shader) => inject(shader, false);
+      o.customDepthMaterial = depth;
+    });
+    return time;
+  }
+
+  /** A pennant on a pole, for imported riders that carry nothing but a sword. */
+  function buildBanner(spec) {
+    const root = group(spec.x, spec.y, spec.z);
+    root.rotation.z = spec.tilt ?? 0.35;
+    root.scale.setScalar(spec.scale ?? 1);
+    root.add(mesh(new THREE.CylinderGeometry(0.028, 0.028, 1.7, 8), MAT.gold, 0, 0.45, 0));
+    root.add(mesh(new THREE.ConeGeometry(0.06, 0.24, 8), MAT.gold, 0, 1.42, 0));
+    const cloth = new THREE.PlaneGeometry(0.62, 0.42, 12, 5);
+    const flag = mesh(cloth, new THREE.MeshStandardMaterial({
+      color: 0xb4173a, emissive: 0x33040e, roughness: 0.6, metalness: 0.2, side: THREE.DoubleSide
+    }), -0.33, 1.02, 0);
+    root.add(flag);
+    return {
+      root,
+      update(t) {
+        const p = cloth.attributes.position;
+        for (let i = 0; i < p.count; i++) {
+          const x = p.getX(i);
+          const k = 0.5 - x / 0.62;                 // 0 at the pole, 1 at the fly
+          p.setZ(i, Math.sin(x * 9 - t * 12) * 0.11 * k);
+          p.setY(i, p.getY(i) * 1 + 0);
+        }
+        p.needsUpdate = true;
+        cloth.computeVertexNormals();
+        root.rotation.z = (spec.tilt ?? 0.35) + Math.sin(t * 3) * 0.035;
+      }
+    };
   }
 
   /**
@@ -1855,20 +1722,25 @@ export function createEntryEngine(canvas, opts = {}) {
 
       const carrier = new THREE.Group();     // the node procedural motion drives
       carrier.add(model);
-      await e.rig.ready;
       e.rig.root.clear();
       e.rig.root.add(carrier);
       e.glb = { carrier, spec };
-      if (name === 'horse' && !gltf.animations?.length) e.glb.articulation = articulateDetailedHorse(model);
 
       if (gltf.animations?.length) {
         const mixer = new THREE.AnimationMixer(model);
         mixer.clipAction(gltf.animations[0]).play();
         e.mixer = mixer;
+      } else if (spec.gallop) {
+        // No skeleton in the file, so the legs are driven in the shader.
+        e.glb.time = applyGallopShader(model, spec.gallop);
+      }
+      if (spec.banner) {
+        const banner = buildBanner(spec.banner);
+        carrier.add(banner.root);
+        e.glb.banner = banner;
       }
       return true;
-    } catch (error) {
-      console.warn(`Detailed ${name} model unavailable; using procedural fallback.`, error);
+    } catch {
       return false;                          // the procedural rig stays in place
     }
   }
@@ -1876,18 +1748,18 @@ export function createEntryEngine(canvas, opts = {}) {
   /** Canter-like motion for a GLB with no clips of its own. */
   function animateStaticModel(glb, t, u) {
     const { carrier } = glb;
-    const beat = t * (glb.spec.cadence ?? 8.4);
-    // A rigid mesh cannot move its legs, so sell the stride with the body:
-    // a bounding rise and fall, a pitch that leads it, and a little roll.
-    carrier.position.y = Math.abs(Math.sin(beat)) * 0.2 - 0.07;
-    carrier.position.x = Math.sin(beat * 0.5) * 0.07;
-    carrier.rotation.z = Math.sin(beat + 0.9) * 0.075;
-    carrier.rotation.x = Math.sin(beat * 0.5) * 0.04;
+    // The legs are swung in the shader; this is the body riding over them.
+    if (glb.time) glb.time.value = t;
+    glb.banner?.update(t);
+    const beat = t * (glb.spec.gallop?.speed ?? glb.spec.cadence ?? 8.4);
+    carrier.position.y = Math.sin(beat * 2) * 0.09 + Math.abs(Math.sin(beat)) * 0.05;
+    carrier.rotation.z = Math.sin(beat * 2 + 0.6) * 0.05;
+    carrier.rotation.x = Math.sin(beat * 0.5) * 0.03;
     void u;
   }
 
   // --- Playback -----------------------------------------------------
-  let active = null, raf = 0, startedAt = 0, lastAt = 0, running = false, onDone = null, visualU = 0, visualT = 0;
+  let active = null, raf = 0, startedAt = 0, lastAt = 0, running = false, onDone = null;
   const TRAIL_OFFSET = new THREE.Vector3(0.85, 0.05, -0.3);
   const size = { w: 1, h: 1 };
 
@@ -1903,35 +1775,17 @@ export function createEntryEngine(canvas, opts = {}) {
     bloom.setSize(w, h);
   }
 
-  /** How quickly the entrance is actually moving along its path right now. */
-  function travelPace(cfg, u) {
-    const delta = 0.003;
-    const a = cfg.path(clamp(u - delta, 0, 1));
-    const b = cfg.path(clamp(u + delta, 0, 1));
-    const distancePerStep = Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z) / (delta * 2);
-    // The centre hero hold still gets an almost imperceptible breathing pose,
-    // while a genuine crossing reaches a full canter/trot.
-    return 0.045 + smooth(clamp((distancePerStep - 4) / 13, 0, 1)) * 0.955;
-  }
-
   function frame(now) {
     if (!running) return;
     raf = requestAnimationFrame(frame);
-    const rawT = (now - startedAt) / 1000;
+    const t = (now - startedAt) / 1000;
     const dt = Math.min((now - lastAt) / 1000, 0.05);
     lastAt = now;
     const e = active;
     if (!e) return;
-    const targetU = clamp(rawT / e.duration, 0, 1);
-    // Smooth display time absorbs occasional mobile frame spikes without
-    // slowing the actual sequence clock or changing its finish time.
-    visualU = THREE.MathUtils.damp(visualU, targetU, e.key === 'carriage' ? 12 : 15, dt);
-    visualT = THREE.MathUtils.damp(visualT, rawT, 15, dt);
-    const u = clamp(visualU, 0, 1);
-    const t = visualT;
+    const u = clamp(t / e.duration, 0, 1);
 
     const p = e.cfg.path(u);
-    const pace = travelPace(e.cfg, u);
     e.pivot.position.set(p.x, e.cfg.y + p.y, p.z);
     e.pivot.rotation.set(0, p.ry, p.rz);
     if (e.glb) {
@@ -1939,23 +1793,14 @@ export function createEntryEngine(canvas, opts = {}) {
       // which are tuned for the warm, dim key light.
       sky.intensity = 1.15;
       if (e.mixer) e.mixer.update(dt);
-      else if (e.glb.articulation) e.glb.articulation.update(t, e.glb.carrier, pace);
       else animateStaticModel(e.glb, t, u);
     } else {
       sky.intensity = 0.45;
-      e.rig.update(t, u, { travel: p.travel, pace });
+      e.rig.update(t, u, { travel: p.travel });
     }
 
     // Fade the ride in and out at the edges instead of popping.
     const vis = window01(u, 0.07, 0.94);
-    sunset.update(t, e.key === 'horse' ? vis : 0);
-    mist.update(t, e.key === 'carriage' ? vis : 0, p.x);
-    // Neutral fill reveals anatomy and gold embossing without bleaching the
-    // pegasus white or turning the reflective coach windows beige.
-    const natural = e.key === 'horse' || e.key === 'carriage';
-    key.intensity = natural ? 2.15 : 1.55;
-    rim.intensity = natural ? .8 : 1.25;
-    if (natural) sky.intensity = .85;
     e.rig.root.visible = vis > 0.02;
 
     // Trail is laid along the path already flown, anchored just behind the body.
@@ -1974,13 +1819,13 @@ export function createEntryEngine(canvas, opts = {}) {
     contact.material.opacity = vis * 0.7 * (1 - lift * 0.72);
     contact.scale.setScalar(1 + lift * 0.7);
     hero.position.set(p.x, e.cfg.y + p.y + 0.6, p.z + 2.2);
-    hero.intensity = vis * (natural ? 1.2 : 4);
+    hero.intensity = vis * 4;
     hero.color.setHex(e.cfg.accent);
     pool.position.x = p.x * 0.55;
     pool.material.color.setHex(e.cfg.pool);
     pool.material.opacity = 0.12 + vis * 0.26;
     podium.material.opacity = vis * 0.16;
-    under.intensity = natural ? .8 + vis : 2.5 + vis * 4;
+    under.intensity = 2.5 + vis * 4;
 
     // Arrival flare and spark burst peak as the ride reaches centre.
     const peak = pulse(u, 0.4, 0.13);
@@ -2018,7 +1863,7 @@ export function createEntryEngine(canvas, opts = {}) {
     resize();
     composer.render();
 
-    if (rawT >= e.duration) {
+    if (t >= e.duration) {
       running = false;
       cancelAnimationFrame(raf);
       e.rig.root.visible = false;
@@ -2035,14 +1880,8 @@ export function createEntryEngine(canvas, opts = {}) {
     /** Preload a ride's geometry so the first click has no hitch. */
     prepare(name) {
       if (!ENTRIES[name]) return;
-      const entry = rigFor(name);
-      return Promise.all([entry.rig.ready, opts.noModels ? false : tryLoadModel(name)]).then(() => {
-        // Compile materials while the page is idle. Otherwise the first tap
-        // has to compile several physical materials and can pause briefly.
-        entry.rig.root.visible = true;
-        renderer.compile(scene, camera);
-        entry.rig.root.visible = false;
-      });
+      rigFor(name);
+      if (!opts.noModels) tryLoadModel(name);
     },
     play(name, duration, done) {
       if (!ENTRIES[name]) return false;
@@ -2054,8 +1893,6 @@ export function createEntryEngine(canvas, opts = {}) {
       active = e;
       onDone = done;
       startedAt = lastAt = performance.now();
-      visualU = 0;
-      visualT = 0;
       running = true;
       resize();
       raf = requestAnimationFrame(frame);
