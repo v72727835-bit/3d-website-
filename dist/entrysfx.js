@@ -40,7 +40,9 @@ export function createSfx() {
     try { ctx = new AC(); } catch { return false; }
 
     master = ctx.createGain();
-    master.gain.value = 0.85;
+    // Leave headroom for hoof impacts and the brass fanfare so the limiter
+    // clarifies the mix instead of flattening it on small phone speakers.
+    master.gain.value = 0.76;
     const limiter = ctx.createDynamicsCompressor();
     limiter.threshold.value = -10;
     limiter.knee.value = 8;
@@ -179,6 +181,15 @@ export function createSfx() {
     lp.connect(g).connect(out);
   }
 
+  /** A short woody creak for the rath's suspension and leather harness. */
+  function creak(out, t, level = 0.06) {
+    const o = osc('triangle', 118, t, 0.24);
+    o.frequency.exponentialRampToValueAtTime(64, t + 0.22);
+    const f = band('bandpass', 300, 1.5);
+    const g = env(t, 0.012, 0.23, level);
+    o.connect(f).connect(g).connect(out);
+  }
+
   /* ---------------------------------------------------------------- *
    * Per-entrance arrangements. Timings mirror the visual rigs: the gallop
    * cycle matches the leg cycle, the engine revs while the bike is moving
@@ -211,7 +222,8 @@ export function createSfx() {
       [0, 0.26, 0.5, 0.76].forEach((f, i) => {
         const t = t0 + c * cycle + f * cycle;
         if (t > t0 + D - 0.15) return;
-        hoof(out, t, 0.5 + (i % 2) * 0.18, 0.8);
+        hoof(out, t, 0.58 + (i % 2) * 0.2, 0.82 + (i % 2) * 0.025);
+        if (i === 0 || i === 2) creak(out, t + 0.045, 0.045);
       });
     }
     // Iron rims on stone: a continuous low rumble that rises and falls.
@@ -219,8 +231,8 @@ export function createSfx() {
     const lp = band('lowpass', 260, 1.1);
     const rum = ctx.createGain();
     rum.gain.setValueAtTime(0.0001, t0);
-    rum.gain.linearRampToValueAtTime(0.1, t0 + D * 0.28);
-    rum.gain.setValueAtTime(0.1, t0 + D * 0.66);
+    rum.gain.linearRampToValueAtTime(0.085, t0 + D * 0.28);
+    rum.gain.setValueAtTime(0.085, t0 + D * 0.66);
     rum.gain.exponentialRampToValueAtTime(0.001, t0 + D);
     n.connect(lp).connect(rum).connect(out);
     // Harness bells, loosely in time with the trot.
@@ -228,8 +240,9 @@ export function createSfx() {
       chime(out, t0 + 0.3 + i * 0.42, 1568 + (i % 3) * 210, 0.045, 0.9);
     }
     // Wingbeats.
-    for (let i = 0; t0 + i * 1.42 < t0 + D - 0.8; i++) {
-      whoosh(out, t0 + 0.15 + i * 1.42, 0.7, 0.14, 240, 1100);
+    const wingBeat = (Math.PI * 2) / 3.1; // matches the live Pegasus rig
+    for (let i = 0; t0 + i * wingBeat < t0 + D - 0.55; i++) {
+      whoosh(out, t0 + 0.12 + i * wingBeat, wingBeat * 0.47, 0.17, 220, 1250);
     }
     [523, 659, 784, 1047].forEach((f, i) => brass(out, t0 + D * 0.3 + i * 0.2, f, 0.9, 0.085));
   }

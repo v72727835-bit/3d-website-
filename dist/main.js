@@ -12,7 +12,9 @@
   const stage = $('entry-stage');
   const video = $('entry-video');
   const steps = [...document.querySelectorAll('.entry-sequence li')];
-  let next = 0, last = -1, playing = false, enabledSound = false, run = 0;
+  // Sound is on by default.  AudioContext creation still happens from the
+  // Enter click, which keeps it compatible with mobile browser audio rules.
+  let next = 0, last = -1, playing = false, enabledSound = true, run = 0;
   let finishTimer, loadTimer, particleFrame;
   const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
 
@@ -72,6 +74,13 @@
     sfx?.play(entries[index].key, entries[index].duration);
   }
 
+  function updateSoundControl() {
+    $('sound').setAttribute('aria-pressed', String(enabledSound));
+    $('sound').setAttribute('aria-label', `Turn entrance sound ${enabledSound ? 'off' : 'on'}`);
+    $('sound').title = `Turn sound ${enabledSound ? 'off' : 'on'}`;
+    $('sound').querySelector('use').setAttribute('href', enabledSound ? '#i-sound' : '#i-mute');
+  }
+
   function particles(color, duration) {
     cancelAnimationFrame(particleFrame);
     const canvas = $('particles');
@@ -126,6 +135,9 @@
 
   async function start(index, replay = false) {
     if (playing) return;
+    // This runs synchronously inside the button press, so the soundtrack is
+    // unlocked before the WebGL preload has a chance to delay the entry.
+    if (enabledSound) sfx?.setEnabled(true);
     const entry = entries[index];
     const token = ++run;
     playing = true;
@@ -209,10 +221,7 @@
     enabledSound = !enabledSound;
     // The first enable happens inside a click, which is what unlocks audio.
     sfx?.setEnabled(enabledSound);
-    $('sound').setAttribute('aria-pressed', String(enabledSound));
-    $('sound').setAttribute('aria-label', `Turn entrance sound ${enabledSound ? 'off' : 'on'}`);
-    $('sound').title = `Turn sound ${enabledSound ? 'off' : 'on'}`;
-    $('sound').querySelector('use').setAttribute('href', enabledSound ? '#i-sound' : '#i-mute');
+    updateSoundControl();
   });
   $('menu').addEventListener('click', () => {
     $('menu-panel').hidden = !$('menu-panel').hidden;
@@ -242,5 +251,6 @@
     if (event.key === 'Escape') { $('menu-panel').hidden = true; $('menu').setAttribute('aria-expanded', 'false'); }
   });
   document.addEventListener('visibilitychange', () => { if (document.hidden) stopSounds(); });
+  updateSoundControl();
   updateControls();
 })();

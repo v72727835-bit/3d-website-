@@ -291,6 +291,9 @@ function buildMaterials() {
   MAT.silver = std({ color: 0xc8d2e8, metalness: 1, roughness: 0.32, envMapIntensity: 1.5, ...metal() });
   MAT.steel = std({ color: 0x7c88a4, metalness: 1, roughness: 0.48, envMapIntensity: 1.2, ...metal() });
   MAT.dark = std({ color: 0x1b2038, metalness: 0.7, roughness: 0.6, envMapIntensity: 1.1, ...grain() });
+  MAT.wood = std({ color: 0x4d2414, metalness: 0.04, roughness: 0.48, envMapIntensity: 0.55, ...grain() });
+  MAT.leather = std({ color: 0x3a1a12, metalness: 0.04, roughness: 0.72, envMapIntensity: 0.35, ...grain() });
+  MAT.iron = std({ color: 0x252b34, metalness: 0.82, roughness: 0.42, envMapIntensity: 1.2, ...metal() });
   MAT.coat = std({ color: 0xc8c4b9, metalness: 0.02, roughness: 0.62, envMapIntensity: 0.65, ...fur() });
   MAT.coatWarm = std({ color: 0x6b3019, metalness: 0.04, roughness: 0.51, envMapIntensity: 1.05, ...fur() });
   MAT.hoof = std({ color: 0x2a2233, metalness: 0.35, roughness: 0.62, ...grain() });
@@ -934,6 +937,25 @@ function buildCarriage() {
   // Driver's bench at the front of the coach.
   coach.add(mesh(new THREE.BoxGeometry(0.42, 0.1, 0.8), MAT.goldDeep, -1.02, 0.78, 0));
   coach.add(mesh(new THREE.BoxGeometry(0.1, 0.34, 0.8), MAT.gold, -1.2, 0.94, 0));
+  // A visible coachman gives the rath a believable scale and a clear source
+  // for the reins instead of making it look like an empty display carriage.
+  const coachman = group(-1.12, 1.08, 0);
+  const coat = mesh(new THREE.CapsuleGeometry(0.16, 0.38, 5, 14), MAT.dark, 0, 0.16, 0);
+  coat.scale.z = 1.25;
+  coachman.add(coat);
+  coachman.add(mesh(new THREE.SphereGeometry(0.13, 16, 12), new THREE.MeshStandardMaterial({ color: 0x8b5438, roughness: 0.66 }), -0.04, 0.54, 0));
+  const hat = mesh(new THREE.CylinderGeometry(0.17, 0.15, 0.12, 16), MAT.dark, -0.04, 0.67, 0);
+  hat.rotation.z = Math.PI / 2;
+  coachman.add(hat);
+  coachman.add(mesh(new THREE.CylinderGeometry(0.23, 0.23, 0.024, 18), MAT.dark, -0.04, 0.62, 0).rotateX(Math.PI / 2));
+  for (const side of [-1, 1]) {
+    const arm = group(-0.05, 0.34, side * 0.13);
+    arm.rotation.z = -0.76;
+    arm.add(mesh(new THREE.CapsuleGeometry(0.048, 0.3, 4, 10), MAT.dark, 0, -0.15, 0));
+    arm.add(mesh(new THREE.SphereGeometry(0.052, 10, 8), new THREE.MeshStandardMaterial({ color: 0x8b5438, roughness: 0.7 }), -0.22, -0.25, 0));
+    coachman.add(arm);
+  }
+  coach.add(coachman);
 
   // Gold trim: a waist rail and a roof rail around the cabin.
   [0.12, 1.02].forEach((y, i) => {
@@ -991,7 +1013,9 @@ function buildCarriage() {
   const wheels = [];
   [[-0.66, 0.42], [0.72, 0.62]].forEach(([wx, r]) => {
     pair((side) => {
-      const w = buildWheel({ radius: r, spokes: r > 0.5 ? 14 : 10 });
+      // Dark iron tyres, wooden rims and brass hubs read as a working rath,
+      // while the prior all-gold wheels looked like stationary ornament.
+      const w = buildWheel({ radius: r, spokes: r > 0.5 ? 14 : 10, rim: MAT.wood, band: MAT.iron, hub: MAT.coachGold });
       w.position.set(wx, -0.55 + r - 0.42, side * 0.62);
       coach.add(w);
       wheels.push(w);
@@ -1027,7 +1051,13 @@ function buildCarriage() {
   const leather = new THREE.MeshStandardMaterial({color:0x58311b,roughness:.72});
   for (const side of [-1,1]) {
     tube(root,[[-1.86,.25,side*.23],[-1.0,-.02,side*.28],[-.1,.08,side*.38],[.51,.43,side*.4]],.012,leather);
+    // Separate reins rise from the coachman's hands to the bit.  Their soft
+    // curve makes the animal and carriage read as one connected rig.
+    tube(root,[[-1.92,.34,side*.15],[-1.22,.47,side*.18],[-.32,.7,side*.23],[.35,1.28,side*.18]],.01,MAT.leather);
     tube(coach,[[-.96,-.40,side*.47],[-.55,-.59,side*.47],[0,-.52,side*.47],[.7,-.43,side*.47]],.023,MAT.goldDeep);
+    const spring = mesh(new THREE.TorusGeometry(.25,.018,6,20,Math.PI),MAT.iron,side*.1,-.44,side*.44);
+    spring.rotation.y=Math.PI/2;
+    coach.add(spring);
     for(let rib=0;rib<5;rib++) {
       const a=Math.PI*(rib/4);
       const vertices=[];
@@ -1052,10 +1082,12 @@ function buildCarriage() {
   return {
     root, horse, ready: horse.ready,
     update(t, u, ctx = {}) {
-      horse.update(t, u, { speed: 7.4, gait: 0.72 });
-      const roll = Math.sin(t * 7.4 * 2) * 0.02;
+      horse.update(t, u, { speed: 7.4, gait: 0.72, wingRate: 3.1 });
+      const roll = Math.sin(t * 7.4 * 2) * 0.014;
       coach.position.y = 0.05 + roll;
-      coach.rotation.z = roll * 0.7;
+      coach.rotation.z = roll * 0.5;
+      coachman.position.y = Math.sin(t * 7.4 * 2 + .4) * .012;
+      coachman.rotation.z = Math.sin(t * 7.4 + .4) * .018;
       const spin = -(ctx.travel ?? t * 2.2) * 2.4;
       wheels.forEach((w) => { w.rotation.z = spin; });
       lanterns.forEach(({ halo }, i) => {
@@ -1836,7 +1868,7 @@ export function createEntryEngine(canvas, opts = {}) {
   }
 
   // --- Playback -----------------------------------------------------
-  let active = null, raf = 0, startedAt = 0, lastAt = 0, running = false, onDone = null;
+  let active = null, raf = 0, startedAt = 0, lastAt = 0, running = false, onDone = null, visualU = 0, visualT = 0;
   const TRAIL_OFFSET = new THREE.Vector3(0.85, 0.05, -0.3);
   const size = { w: 1, h: 1 };
 
@@ -1855,12 +1887,18 @@ export function createEntryEngine(canvas, opts = {}) {
   function frame(now) {
     if (!running) return;
     raf = requestAnimationFrame(frame);
-    const t = (now - startedAt) / 1000;
+    const rawT = (now - startedAt) / 1000;
     const dt = Math.min((now - lastAt) / 1000, 0.05);
     lastAt = now;
     const e = active;
     if (!e) return;
-    const u = clamp(t / e.duration, 0, 1);
+    const targetU = clamp(rawT / e.duration, 0, 1);
+    // Smooth display time absorbs occasional mobile frame spikes without
+    // slowing the actual sequence clock or changing its finish time.
+    visualU = THREE.MathUtils.damp(visualU, targetU, e.key === 'carriage' ? 12 : 15, dt);
+    visualT = THREE.MathUtils.damp(visualT, rawT, 15, dt);
+    const u = clamp(visualU, 0, 1);
+    const t = visualT;
 
     const p = e.cfg.path(u);
     e.pivot.position.set(p.x, e.cfg.y + p.y, p.z);
@@ -1949,7 +1987,7 @@ export function createEntryEngine(canvas, opts = {}) {
     resize();
     composer.render();
 
-    if (t >= e.duration) {
+    if (rawT >= e.duration) {
       running = false;
       cancelAnimationFrame(raf);
       e.rig.root.visible = false;
@@ -1979,6 +2017,8 @@ export function createEntryEngine(canvas, opts = {}) {
       active = e;
       onDone = done;
       startedAt = lastAt = performance.now();
+      visualU = 0;
+      visualT = 0;
       running = true;
       resize();
       raf = requestAnimationFrame(frame);
