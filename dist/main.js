@@ -12,9 +12,7 @@
   const stage = $('entry-stage');
   const video = $('entry-video');
   const steps = [...document.querySelectorAll('.entry-sequence li')];
-  // Sound is on by default.  AudioContext creation still happens from the
-  // Enter click, which keeps it compatible with mobile browser audio rules.
-  let next = 0, last = -1, playing = false, enabledSound = true, run = 0;
+  let next = 0, last = -1, playing = false, enabledSound = false, run = 0;
   let finishTimer, loadTimer, particleFrame;
   const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
 
@@ -27,13 +25,15 @@
       if (enabledSound) sfx.setEnabled(true);
     })
     .catch(() => { sfx = null; });
-  const engineReady = import('./entry3d.js')
-    .then(async (mod) => {
+  import('./entry3d.js')
+    .then((mod) => {
       gl = mod.createEntryEngine($('stage3d'));
       if (!gl) throw new Error('no webgl');
       room.classList.add('gl');
       gl.resize();
-      await Promise.all(entries.map((e) => gl.prepare(e.key)));
+      entries.forEach((e) => gl.prepare(e.key));
+      // Compile every shader before the first click, once the models are in.
+      gl.warmUp?.();
       window.addEventListener('resize', () => gl.resize(), { passive: true });
     })
     .catch(() => {
@@ -72,13 +72,6 @@
     // Hooves, wingbeats, engine and roar are synthesised in entrysfx.js and
     // scheduled against the audio clock, so they stay in step with the rig.
     sfx?.play(entries[index].key, entries[index].duration);
-  }
-
-  function updateSoundControl() {
-    $('sound').setAttribute('aria-pressed', String(enabledSound));
-    $('sound').setAttribute('aria-label', `Turn entrance sound ${enabledSound ? 'off' : 'on'}`);
-    $('sound').title = `Turn sound ${enabledSound ? 'off' : 'on'}`;
-    $('sound').querySelector('use').setAttribute('href', enabledSound ? '#i-sound' : '#i-mute');
   }
 
   function particles(color, duration) {
@@ -135,20 +128,12 @@
 
   async function start(index, replay = false) {
     if (playing) return;
-    // This runs synchronously inside the button press, so the soundtrack is
-    // unlocked before the WebGL preload has a chance to delay the entry.
-    if (enabledSound) sfx?.setEnabled(true);
     const entry = entries[index];
     const token = ++run;
     playing = true;
     $('menu-panel').hidden = true;
     $('menu').setAttribute('aria-expanded', 'false');
     updateControls(index);
-    // If the renderer already exists, begin with its lightweight procedural
-    // rig immediately. Background model preloading can finish independently
-    // instead of making the first tap wait for every entrance asset.
-    if (!gl) await engineReady;
-    if (token !== run) return;
     $('message-heading').textContent = `${entry.name} is arriving`;
     $('message-detail').textContent = 'The room is yours.';
     stage.className = `entry-stage ${entry.key}`;
@@ -224,7 +209,10 @@
     enabledSound = !enabledSound;
     // The first enable happens inside a click, which is what unlocks audio.
     sfx?.setEnabled(enabledSound);
-    updateSoundControl();
+    $('sound').setAttribute('aria-pressed', String(enabledSound));
+    $('sound').setAttribute('aria-label', `Turn entrance sound ${enabledSound ? 'off' : 'on'}`);
+    $('sound').title = `Turn sound ${enabledSound ? 'off' : 'on'}`;
+    $('sound').querySelector('use').setAttribute('href', enabledSound ? '#i-sound' : '#i-mute');
   });
   $('menu').addEventListener('click', () => {
     $('menu-panel').hidden = !$('menu-panel').hidden;
@@ -254,6 +242,5 @@
     if (event.key === 'Escape') { $('menu-panel').hidden = true; $('menu').setAttribute('aria-expanded', 'false'); }
   });
   document.addEventListener('visibilitychange', () => { if (document.hidden) stopSounds(); });
-  updateSoundControl();
   updateControls();
 })();

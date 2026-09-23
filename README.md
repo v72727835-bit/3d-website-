@@ -41,6 +41,67 @@ them, so the page still ships no image files. A shadow-mapped key light follows
 the ride for self-shadowing, and a soft contact shadow keeps it standing in the
 room rather than pasted over it.
 
+## The photoreal entrances
+
+The horse rider and the royal rath render in a second look built for realism;
+the superbike and dragon keep the stylised one. `ENTRIES.<key>.photoreal`
+selects it, and `applyLook()` switches the whole stage when a ride starts:
+
+- **Tone curve.** AgX instead of ACES. ACES pushed the chestnut coat toward
+  salmon pink; AgX rolls highlights off the way a camera does.
+- **Reflections.** A generated golden-hour studio — deep blue zenith, a warm
+  low-sun horizon, three HDR softboxes — replaces the grey room environment for
+  these two. Metal is mostly reflection, and this is what turns plaster-grey
+  armour into polished steel.
+- **Almost no bloom.** A glow around a white horse is the strongest "cartoon"
+  cue there is. Sparkles, the flare and the comet trail are switched off; the
+  floor glow and light shafts are dialled down; the pink stage fill is off.
+
+The imported model is one mesh with one colour texture, so its armour rendered
+exactly like its coat. `applyRealisticSurface()` classifies each texel in the
+fragment shader — grey inside the rider's measured volume is steel (metallic,
+polished), saturated is coat (satin, deepened to chestnut), dark is leather —
+and a detail normal map is derived from the texture's own shading at load,
+which brings out the engraving on the plate and the muscle under the coat. The
+same patch with `tint: 'white'` makes the grey-white carriage team.
+
+Hooves and wheels kick up dust: soft, non-additive puffs left where they were
+kicked, so they trail behind the ride and take the light instead of glowing.
+The knight carries a velvet swallowtail guidon — sheen material, gold
+embroidery that is actually metallic, a real notch, and it streams *behind*
+the horse, as a banner on a galloping horse must.
+
+### The coach
+
+`buildStateCoach()` replaces the old capsule-built pegasus and cart. The body
+is a stack of rounded-rectangle rings that swell out and back in with height
+(the bombé belly of a real state coach), closed by a domed roof, and every ring
+is parameterised by arc length over fixed segments — so one (u, v) map lines up
+with the geometry at every height. Colour, roughness/metalness and height are
+painted against that map: crimson lacquer panels recessed into burnished gold,
+matte chased scrolls, gadroons, egg-and-dart, the arms on the doors. Mouldings,
+window frames and the door are real tubes laid along curves on the same map;
+the windows are conforming glass patches over a lit interior with velvet
+curtains. On top: a crown with pearl-strung arches and jewels, and turned urns
+at the corners. Underneath: dished, lacquered spokes (merged into one mesh per
+wheel), gilt felloes, iron tyres, turned naves, a perch, C-springs, and leather
+braces the body actually sways from. Two of the scanned horse trot in the
+shafts — white, crimson plumes, traces running back to the splinter bar.
+
+### First-play stall
+
+WebGL compiles a shader the first time it is drawn, synchronously. With
+physical materials and their shadow twins that can freeze the first entrance,
+badly on phones. `warmUp()` waits for the models, then draws every rig once in
+both looks while the stage is still transparent. `main.js` calls it right
+after preparing the rides.
+
+### Fixed along the way
+
+Every wheel — coach and superbike — was spinning backwards. A wheel moving
+toward -x must turn so its top edge also moves toward -x; the angle now grows
+with distance travelled.
+
 ## Sound
 
 `dist/entrysfx.js` synthesises the entrance audio — no sound files either.
