@@ -607,7 +607,7 @@ function buildRider({ armour = MAT.steel, cloth = MAT.crimson, lean = 0 } = {}) 
  * which is the direction every entrance travels across the stage.
  * ------------------------------------------------------------------ */
 
-function buildHorse({ coat = MAT.coat, winged = false, rider = true, scale = 1 } = {}) {
+function buildHorse({ coat = MAT.coat, winged = false, rider = true, scale = 1, detailed = true } = {}) {
   const root = group();
   const body = group();
   root.add(body);
@@ -707,7 +707,10 @@ function buildHorse({ coat = MAT.coat, winged = false, rider = true, scale = 1 }
 
   let morphMixer = null, previousTime = 0, anatomicalRig = null, anatomyCarrier = null, anatomyMotion = null;
   let gaitClock = 0, gaitPreviousTime = 0;
-  const ready = horseAsset().then((asset) => {
+  // The scan is ideal for the rider entrance.  The winged rath uses this
+  // fully connected procedural body so its shoulders, wings and harness all
+  // share one coordinate system instead of drifting apart on small screens.
+  const ready = detailed ? horseAsset().then((asset) => {
     // Keep the authored scene transforms intact. Fit a detached wrapper so
     // fitting never depends on the parent carriage's scale or current pose.
     const anatomy = new THREE.Group();
@@ -784,7 +787,7 @@ function buildHorse({ coat = MAT.coat, winged = false, rider = true, scale = 1 }
       anatomyMotion = articulateDetailedHorse(asset.scene);
     }
     return true;
-  }).catch((error) => { console.warn('Animated horse unavailable; using articulated fallback.', error); return false; });
+  }).catch((error) => { console.warn('Animated horse unavailable; using articulated fallback.', error); return false; }) : Promise.resolve(false);
 
   return {
     root, body, head, neck, wings, rider: man, ready,
@@ -1037,7 +1040,7 @@ function buildCarriage() {
   });
 
   // --- Draught pegasus --------------------------------------------
-  const horse = buildHorse({ coat: MAT.coat, winged: true, rider: false, scale: .72 });
+  const horse = buildHorse({ coat: MAT.coat, winged: true, rider: false, scale: .72, detailed: false });
   horse.root.position.set(-1.38, 0.20, 0);
   horse.wings?.forEach((wing) => {
     wing.root.scale.setScalar(.95);
