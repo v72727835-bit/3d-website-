@@ -827,21 +827,25 @@ function buildHorse({ coat = MAT.coat, winged = false, rider = true, scale = 1 }
         j.rotation.y = Math.sin(gait * 0.9 - i * 0.42) * 0.2;
       });
       if (wings) {
-        // A loaded carriage horse moves at a measured trot, so its wings use
-        // a broad downstroke and a quick recovery rather than a rigid sine.
+        // The whole wing drives the broad stroke while every feather receives
+        // a delayed breeze ripple.  The delay travels from the covered base
+        // towards the long primaries, like a real wing flexing in the air.
         const beat = gaitClock * (ctx.wingRate ?? 0.42);
         const flap = Math.sin(beat);
         const downstroke = Math.max(0, flap);
+        const idleBreeze = Math.sin(t * 2.35);
         wings.forEach((w) => {
-          w.root.rotation.x = w.side * (0.16 + flap * 0.42);
+          w.root.rotation.x = w.side * (0.16 + flap * 0.42 + idleBreeze * 0.025);
           w.root.rotation.z = -0.04 + flap * 0.13;
           w.mid.rotation.x = -w.side * (0.15 + flap * 0.36);
-          w.mid.rotation.y = w.side * (0.08 + flap * 0.16);
+          w.mid.rotation.y = w.side * (0.08 + flap * 0.16 + idleBreeze * 0.028);
           w.feathers.forEach((f) => {
             const primary = f.row / 2;
-            const flex = downstroke * (0.08 + primary * 0.22) + Math.sin(beat - f.k * 0.35) * 0.035;
+            const ripple = Math.sin(t * 4.8 - f.k * 5.4 - f.row * 0.72);
+            const flex = downstroke * (0.08 + primary * 0.22) + ripple * (0.014 + primary * 0.052);
             f.pivot.rotation.z = f.restZ - flex;
-            f.pivot.rotation.y = f.restY + w.side * (downstroke * (0.04 + primary * 0.12));
+            f.pivot.rotation.y = f.restY + w.side * (downstroke * (0.04 + primary * 0.12) + ripple * (0.012 + primary * 0.045));
+            f.pivot.rotation.x = w.side * ripple * (0.018 + primary * 0.055);
           });
         });
       }
