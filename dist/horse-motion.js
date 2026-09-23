@@ -12,21 +12,30 @@ vec2 horseRotate(vec2 p, float a) {
 }
 vec3 horsePose(vec3 p) {
   vec3 q = p;
-  float cycle = horseTime * 8.4;
+  // A diagonal-pair canter: fore and hind legs alternate while the near side
+  // leads by a small amount.  This retains a readable footfall at phone size.
+  float cycle = horseTime * 7.65;
   float fore = step(0.12, p.z);
   float side = step(0.0, p.x);
-  float phase = cycle + mix(3.35, 0.0, fore) + side * 0.62;
+  float phase = cycle + mix(3.14159, 0.0, fore) + side * 0.46;
   float legs = (1.0-smoothstep(-0.64, -0.47, p.y));
   // Exclude the flowing tail from the hind-leg field.
   legs *= smoothstep(-0.57, -0.32, p.z);
-  float thighAngle = sin(phase) * mix(0.46, 0.59, fore);
-  float kneeAngle = -max(0.0, sin(phase-0.8)) * mix(0.78, 1.04, fore);
+  float stride = sin(phase);
+  float airborne = max(0.0, stride);
+  float landing = max(0.0, -stride);
+  float thighAngle = stride * mix(0.50, 0.64, fore);
+  float kneeAngle = -airborne * mix(0.88, 1.14, fore) + landing * 0.12;
   float shin = 1.0-smoothstep(-0.80, -0.69, p.y);
   vec2 knee = vec2(-0.75, mix(-0.24, 0.43, fore));
   vec2 hip = vec2(-0.46, mix(-0.10, 0.43, fore));
   vec2 bent = knee + horseRotate(p.yz-knee, kneeAngle*shin);
   bent = hip + horseRotate(bent-hip, thighAngle);
   q.yz = mix(p.yz, bent, legs);
+  // Lift is concentrated at the hoof during the swing and fades at the hip,
+  // making each planted hoof read as a separate, grounded step.
+  float hoof = 1.0-smoothstep(-0.97, -0.76, p.y);
+  q.y += airborne * hoof * mix(0.065, 0.12, fore) * legs;
   float head = smoothstep(0.43, 0.73, p.z) * smoothstep(-0.40, -0.16, p.y);
   q.yz = mix(q.yz, vec2(-0.22,0.46)+horseRotate(q.yz-vec2(-0.22,0.46),sin(cycle+0.5)*0.065),head);
   float tail = 1.0-smoothstep(-0.70,-0.30,p.z);
@@ -87,10 +96,11 @@ export function articulateDetailedHorse(model) {
   return {
     update(t, carrier) {
       time.value = t;
-      const beat = t * 8.4;
-      carrier.position.y = 0.07 + Math.sin(beat*2-0.6)*0.065;
-      carrier.rotation.z = Math.sin(beat+0.5)*0.025;
-      carrier.rotation.x = Math.sin(beat*0.5)*0.015;
+      const beat = t * 7.65;
+      // A subtle two-beat rise keeps the body weight over the planted legs.
+      carrier.position.y = 0.065 + Math.sin(beat * 2 - 0.6) * 0.045 + Math.abs(Math.sin(beat)) * 0.035;
+      carrier.rotation.z = Math.sin(beat + 0.5) * 0.032;
+      carrier.rotation.x = Math.sin(beat * 0.5) * 0.018;
     }
   };
 }

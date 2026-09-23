@@ -353,9 +353,15 @@ function buildLeg({ coat = MAT.coat, thigh = 0.5, shank = 0.5, thick = 0.15 } = 
 /** Drives one leg through a gallop cycle. `phase` staggers the four legs. */
 function galloped(leg, t, phase, amount = 1) {
   const a = t + phase;
-  leg.hip.rotation.z = Math.sin(a) * 0.95 * amount;
-  leg.knee.rotation.z = -(0.18 + Math.max(0, Math.sin(a - 1.05)) * 1.25) * amount;
-  leg.ankle.rotation.z = Math.sin(a - 1.7) * 0.4 * amount;
+  // A horse places the hoof under the body before pushing back, then folds
+  // the lower leg only while it is off the ground.  Separating those phases
+  // stops the simple pendulum motion that makes a gallop look mechanical.
+  const stride = Math.sin(a);
+  const airborne = Math.max(0, stride);
+  const landing = Math.max(0, -stride);
+  leg.hip.rotation.z = stride * 0.78 * amount;
+  leg.knee.rotation.z = (-0.1 - airborne * 1.05 + landing * 0.16) * amount;
+  leg.ankle.rotation.z = (-0.06 + Math.sin(a - 0.72) * 0.24 + airborne * 0.19) * amount;
 }
 
 /** A tapered chain (tail, whisker of mane, dragon spine offshoot). */
@@ -382,6 +388,7 @@ function buildChain(segments, radius, length, mat, taper = 0.72) {
 function buildFeatherWing(side, { span = 2.0, rows = 3, per = 8, mat = MAT.feather } = {}) {
   const root = group();
   const mid = group();
+  const feathers = [];
   root.add(mid);
   const shoulder = mesh(new THREE.CapsuleGeometry(0.075, span * 0.3, 4, 8), mat, 0.12, 0.2, side * 0.1);
   shoulder.rotation.z = 0.9;
@@ -408,10 +415,16 @@ function buildFeatherWing(side, { span = 2.0, rows = 3, per = 8, mat = MAT.feath
       vane.computeVertexNormals();
       const feather = mesh(vane, mat);
       pivot.add(feather);
+      // The exposed central shaft catches a thinner highlight than the vane.
+      // It gives the long flight feathers their individual structure.
+      const shaft = mesh(new THREE.CylinderGeometry(0.009, 0.013, len * 0.96, 6), MAT.coachIvory, len * 0.47, 0, 0.012);
+      shaft.rotation.z = Math.PI / 2;
+      pivot.add(shaft);
       mid.add(pivot);
+      feathers.push({ pivot, row: r, k, restZ: theta, restY: side * (0.1 + k * 0.28) });
     }
   }
-  return { root, mid };
+  return { root, mid, feathers };
 }
 
 /**
@@ -685,7 +698,7 @@ function buildHorse({ coat = MAT.coat, winged = false, rider = true, scale = 1 }
 
   root.scale.setScalar(scale);
 
-  let morphMixer = null, previousTime = 0, anatomicalRig = null;
+  let morphMixer = null, previousTime = 0, anatomicalRig = null, anatomyCarrier = null, anatomyMotion = null;
   const ready = horseAsset().then((asset) => {
     // Keep the authored scene transforms intact. Fit a detached wrapper so
     // fitting never depends on the parent carriage's scale or current pose.
@@ -702,6 +715,7 @@ function buildHorse({ coat = MAT.coat, winged = false, rider = true, scale = 1 }
     const anatomyScale = factor;
     anatomy.scale.setScalar(anatomyScale);
     anatomy.position.set(-center.x * anatomyScale, -1.18 - box.min.y * anatomyScale, 0);
+    anatomyCarrier = anatomy;
     anatomy.traverse((part) => {
       if (!part.isMesh) return;
       part.geometry = part.geometry.clone();
@@ -756,6 +770,10 @@ function buildHorse({ coat = MAT.coat, winged = false, rider = true, scale = 1 }
       morphMixer = new THREE.AnimationMixer(asset.scene);
       const gallop = THREE.AnimationClip.findByName(asset.animations, 'Gallop') || asset.animations.find((clip) => /gallop$/i.test(clip.name)) || asset.animations[0];
       morphMixer.clipAction(gallop).setDuration(.72).play();
+    } else {
+      // The detailed draught horse has no baked clip.  Articulate its actual
+      // mesh so the legs, neck and tail keep moving beneath the live wings.
+      anatomyMotion = articulateDetailedHorse(asset.scene);
     }
     return true;
   }).catch((error) => { console.warn('Animated horse unavailable; using articulated fallback.', error); return false; });
@@ -768,6 +786,7 @@ function buildHorse({ coat = MAT.coat, winged = false, rider = true, scale = 1 }
         morphMixer.update(Math.min(Math.max(t - previousTime, 0), .075));
         previousTime = t;
       }
+      anatomyMotion?.update(t, anatomyCarrier);
       if (anatomicalRig) {
         // Keep the face details and wing roots attached to the animated animal,
         // including when its neck rises during the stride.
@@ -797,12 +816,22 @@ function buildHorse({ coat = MAT.coat, winged = false, rider = true, scale = 1 }
         j.rotation.y = Math.sin(gait * 0.9 - i * 0.42) * 0.2;
       });
       if (wings) {
-        const flap = Math.sin(t * 4.4);
+        // A loaded carriage horse moves at a measured trot, so its wings use
+        // a broad downstroke and a quick recovery rather than a rigid sine.
+        const beat = t * (ctx.wingRate ?? 3.1);
+        const flap = Math.sin(beat);
+        const downstroke = Math.max(0, flap);
         wings.forEach((w) => {
-          w.root.rotation.x = w.side * (0.3 + flap * 0.5);
-          w.root.rotation.z = flap * 0.16;
-          w.mid.rotation.x = -w.side * (0.08 + flap * 0.24);
-          w.mid.rotation.y = w.side * flap * 0.12;
+          w.root.rotation.x = w.side * (0.16 + flap * 0.42);
+          w.root.rotation.z = -0.04 + flap * 0.13;
+          w.mid.rotation.x = -w.side * (0.15 + flap * 0.36);
+          w.mid.rotation.y = w.side * (0.08 + flap * 0.16);
+          w.feathers.forEach((f) => {
+            const primary = f.row / 2;
+            const flex = downstroke * (0.08 + primary * 0.22) + Math.sin(beat - f.k * 0.35) * 0.035;
+            f.pivot.rotation.z = f.restZ - flex;
+            f.pivot.rotation.y = f.restY + w.side * (downstroke * (0.04 + primary * 0.12));
+          });
         });
       }
       if (man) {
