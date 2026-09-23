@@ -49,6 +49,8 @@ vec3 horsePose(vec3 p) {
 
 export function articulateDetailedHorse(model) {
   const time = { value: 0 };
+  let previousTime = 0;
+  let strideTime = 0;
   model.traverse((part) => {
     if (!part.isMesh) return;
     part.frustumCulled = false; // The animated hooves extend past the rest bounds.
@@ -94,13 +96,19 @@ export function articulateDetailedHorse(model) {
     part.customDistanceMaterial = configure(new THREE.MeshDistanceMaterial(), false);
   });
   return {
-    update(t, carrier) {
-      time.value = t;
-      const beat = t * 7.65;
+    update(t, carrier, pace = 1) {
+      // Keep a separate stride clock.  Playback may slow to an arrival hold;
+      // scaling raw time would snap a hoof backward whenever that speed changes.
+      if (t < previousTime) strideTime = 0;
+      const dt = Math.min(Math.max(t - previousTime, 0), 0.08);
+      previousTime = t;
+      strideTime += dt * pace;
+      time.value = strideTime;
+      const beat = strideTime * 7.65;
       // A subtle two-beat rise keeps the body weight over the planted legs.
-      carrier.position.y = 0.065 + Math.sin(beat * 2 - 0.6) * 0.045 + Math.abs(Math.sin(beat)) * 0.035;
-      carrier.rotation.z = Math.sin(beat + 0.5) * 0.032;
-      carrier.rotation.x = Math.sin(beat * 0.5) * 0.018;
+      carrier.position.y = 0.065 + (Math.sin(beat * 2 - 0.6) * 0.045 + Math.abs(Math.sin(beat)) * 0.035) * pace;
+      carrier.rotation.z = Math.sin(beat + 0.5) * 0.032 * pace;
+      carrier.rotation.x = Math.sin(beat * 0.5) * 0.018 * pace;
     }
   };
 }

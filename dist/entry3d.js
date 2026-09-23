@@ -702,6 +702,7 @@ function buildHorse({ coat = MAT.coat, winged = false, rider = true, scale = 1 }
   root.scale.setScalar(scale);
 
   let morphMixer = null, previousTime = 0, anatomicalRig = null, anatomyCarrier = null, anatomyMotion = null;
+  let gaitClock = 0, gaitPreviousTime = 0;
   const ready = horseAsset().then((asset) => {
     // Keep the authored scene transforms intact. Fit a detached wrapper so
     // fitting never depends on the parent carriage's scale or current pose.
@@ -784,12 +785,13 @@ function buildHorse({ coat = MAT.coat, winged = false, rider = true, scale = 1 }
   return {
     root, body, head, neck, wings, rider: man, ready,
     update(t, u, ctx = {}) {
+      const pace = ctx.pace ?? 1;
       if (morphMixer) {
         if (t < previousTime) morphMixer.setTime(0);
-        morphMixer.update(Math.min(Math.max(t - previousTime, 0), .075));
+        morphMixer.update(Math.min(Math.max(t - previousTime, 0), .075) * pace);
         previousTime = t;
       }
-      anatomyMotion?.update(t, anatomyCarrier);
+      anatomyMotion?.update(t, anatomyCarrier, pace);
       if (anatomicalRig) {
         // Keep the face details and wing roots attached to the animated animal,
         // including when its neck rises during the stride.
@@ -802,8 +804,10 @@ function buildHorse({ coat = MAT.coat, winged = false, rider = true, scale = 1 }
           wing.root.position.copy(shoulder).add(new THREE.Vector3(.25,.02,wing.side*.21));
         }
       }
-      const speed = ctx.speed ?? 9.5;
-      const gait = t * speed;
+      if (t < gaitPreviousTime) gaitClock = 0;
+      gaitClock += Math.min(Math.max(t - gaitPreviousTime, 0), .08) * (ctx.speed ?? 9.5) * pace;
+      gaitPreviousTime = t;
+      const gait = gaitClock;
       legs.forEach(({ leg, phase }) => galloped(leg, gait, phase, ctx.gait ?? 1));
       // Suspension bounce and the pitch of a horse at full stretch.
       body.position.y = Math.sin(gait * 2) * 0.1 + Math.abs(Math.sin(gait)) * 0.05;
@@ -821,7 +825,7 @@ function buildHorse({ coat = MAT.coat, winged = false, rider = true, scale = 1 }
       if (wings) {
         // A loaded carriage horse moves at a measured trot, so its wings use
         // a broad downstroke and a quick recovery rather than a rigid sine.
-        const beat = t * (ctx.wingRate ?? 3.1);
+        const beat = gaitClock * (ctx.wingRate ?? 0.42);
         const flap = Math.sin(beat);
         const downstroke = Math.max(0, flap);
         wings.forEach((w) => {
@@ -1082,8 +1086,9 @@ function buildCarriage() {
   return {
     root, horse, ready: horse.ready,
     update(t, u, ctx = {}) {
-      horse.update(t, u, { speed: 7.4, gait: 0.72, wingRate: 3.1 });
-      const roll = Math.sin(t * 7.4 * 2) * 0.014;
+      const pace = ctx.pace ?? 1;
+      horse.update(t, u, { speed: 7.4, gait: 0.72, pace, wingRate: 0.42 });
+      const roll = Math.sin(t * 7.4 * 2) * 0.014 * pace;
       coach.position.y = 0.05 + roll;
       coach.rotation.z = roll * 0.5;
       coachman.position.y = Math.sin(t * 7.4 * 2 + .4) * .012;
@@ -1884,6 +1889,17 @@ export function createEntryEngine(canvas, opts = {}) {
     bloom.setSize(w, h);
   }
 
+  /** How quickly the entrance is actually moving along its path right now. */
+  function travelPace(cfg, u) {
+    const delta = 0.003;
+    const a = cfg.path(clamp(u - delta, 0, 1));
+    const b = cfg.path(clamp(u + delta, 0, 1));
+    const distancePerStep = Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z) / (delta * 2);
+    // The centre hero hold still gets an almost imperceptible breathing pose,
+    // while a genuine crossing reaches a full canter/trot.
+    return 0.045 + smooth(clamp((distancePerStep - 4) / 13, 0, 1)) * 0.955;
+  }
+
   function frame(now) {
     if (!running) return;
     raf = requestAnimationFrame(frame);
@@ -1901,6 +1917,7 @@ export function createEntryEngine(canvas, opts = {}) {
     const t = visualT;
 
     const p = e.cfg.path(u);
+    const pace = travelPace(e.cfg, u);
     e.pivot.position.set(p.x, e.cfg.y + p.y, p.z);
     e.pivot.rotation.set(0, p.ry, p.rz);
     if (e.glb) {
@@ -1908,11 +1925,11 @@ export function createEntryEngine(canvas, opts = {}) {
       // which are tuned for the warm, dim key light.
       sky.intensity = 1.15;
       if (e.mixer) e.mixer.update(dt);
-      else if (e.glb.articulation) e.glb.articulation.update(t, e.glb.carrier);
+      else if (e.glb.articulation) e.glb.articulation.update(t, e.glb.carrier, pace);
       else animateStaticModel(e.glb, t, u);
     } else {
       sky.intensity = 0.45;
-      e.rig.update(t, u, { travel: p.travel });
+      e.rig.update(t, u, { travel: p.travel, pace });
     }
 
     // Fade the ride in and out at the edges instead of popping.
