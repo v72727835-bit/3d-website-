@@ -833,6 +833,255 @@ function lathe(profile, segments = 28) {
   return new THREE.LatheGeometry(profile.map(([r, y]) => new THREE.Vector2(r, y)), segments);
 }
 
+/* ------------------------------------------------------------------ *
+ * Fairy-tale coach: cloud bed, arrival flash, feathered wings
+ * ------------------------------------------------------------------ */
+
+/**
+ * A cumulus puff: dozens of soft discs, denser and brighter toward the top
+ * where the sun catches it, with a flatter, greyer base. Drawn once.
+ */
+let cloudTex = null;
+function cloudTexture() {
+  if (cloudTex) return cloudTex;
+  cloudTex = canvasTexture(256, (g, s) => {
+    let seed = 7;
+    const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    for (let i = 0; i < 70; i++) {
+      const a = rnd() * Math.PI, r = Math.sqrt(rnd());
+      const x = s / 2 + Math.cos(a) * r * s * 0.34 * (rnd() < 0.5 ? -1 : 1);
+      const y = s * 0.62 - Math.sin(a) * r * s * 0.26;
+      const rad = s * (0.07 + rnd() * 0.12) * (1 - r * 0.4);
+      const lit = 1 - (y / s - 0.35);                    // brighter on top
+      const gr = g.createRadialGradient(x, y - rad * 0.25, 0, x, y, rad);
+      const v = Math.round(215 + 40 * Math.min(lit, 1));
+      gr.addColorStop(0, `rgba(${v},${v},${v},0.55)`);
+      gr.addColorStop(0.6, `rgba(${v - 20},${v - 20},${v - 10},0.28)`);
+      gr.addColorStop(1, 'rgba(200,200,215,0)');
+      g.fillStyle = gr;
+      g.beginPath(); g.arc(x, y, rad, 0, 7); g.fill();
+    }
+    // flatten the base
+    const fade = g.createLinearGradient(0, s * 0.62, 0, s * 0.8);
+    fade.addColorStop(0, 'rgba(0,0,0,0)'); fade.addColorStop(1, 'rgba(0,0,0,1)');
+    g.globalCompositeOperation = 'destination-out';
+    g.fillStyle = fade; g.fillRect(0, s * 0.62, s, s * 0.38);
+    g.globalCompositeOperation = 'source-over';
+  });
+  return cloudTex;
+}
+
+/**
+ * The luminous cloud bank the coach rides on, as in the reference: white and
+ * lavender puffs lit from inside, drifting back past the wheels so the coach
+ * reads as flying, with a soft glow under the whole bank. Also carries the
+ * white arrival flash that blooms around the winged horse.
+ */
+function buildCloudBed(rig, ground, lowPower, flashAt) {
+  const root = group(0, 0, 0);
+  rig.add(root);
+  const tex = cloudTexture();
+  const tints = [0xffffff, 0xf1e6ff, 0xe4d2ff, 0xffe6f6, 0xfff6ea];
+  const puffs = [];
+  const n = lowPower ? 16 : 26;
+  const SPAN = 9.6;
+  for (let i = 0; i < n; i++) {
+    const back = i % 3 === 0;                      // a row behind the wheels, and one in front
+    const m = new THREE.SpriteMaterial({
+      map: tex, color: new THREE.Color(tints[i % tints.length]).multiplyScalar(back ? 1.05 : 1.35),
+      transparent: true, depthWrite: false, opacity: 0
+    });
+    const sp = new THREE.Sprite(m);
+    const w = 1.5 + Math.random() * 1.9;
+    sp.scale.set(w, w * 0.62, 1);
+    sp.userData = {
+      x: -SPAN / 2 + (i / n) * SPAN + Math.random() * 0.3,
+      y: ground + (back ? 0.05 : -0.25) + Math.random() * 0.3,
+      z: back ? -1.1 - Math.random() * 0.4 : 0.9 + Math.random() * 0.8,
+      speed: 0.35 + Math.random() * 0.25,
+      op: back ? 0.85 : 0.95,
+      bob: Math.random() * 6.28
+    };
+    sp.renderOrder = back ? 2 : 8;
+    root.add(sp);
+    puffs.push(sp);
+  }
+  // Inner glow: the bank lit from within.
+  const glowMat = new THREE.SpriteMaterial({ map: TEX.spark, color: 0xc9a6ff, transparent: true, opacity: 0,
+    blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false });
+  const glow = new THREE.Sprite(glowMat);
+  glow.scale.set(11, 2.6, 1);
+  glow.position.set(0, ground + 0.1, 0.2);
+  glow.renderOrder = 3;
+  root.add(glow);
+
+  // White arrival flash with a star glint.
+  const flashMat = new THREE.SpriteMaterial({ map: TEX.spark, color: 0xf2eeff, transparent: true, opacity: 0,
+    blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false });
+  const flash = new THREE.Sprite(flashMat);
+  flash.position.copy(flashAt);
+  flash.renderOrder = 9;
+  root.add(flash);
+  const starMat = flashMat.clone(); starMat.map = TEX.star;
+  const star = new THREE.Sprite(starMat);
+  star.position.copy(flashAt);
+  star.renderOrder = 9;
+  root.add(star);
+
+  return {
+    update(t, u) {
+      const vis = Math.min(u / 0.12, 1);
+      puffs.forEach((sp) => {
+        const d = sp.userData;
+        // drift aft and wrap, so the bank streams past a coach holding station
+        let x = d.x + t * d.speed;
+        x = ((x + SPAN / 2) % SPAN + SPAN) % SPAN - SPAN / 2;
+        sp.position.set(x, d.y + Math.sin(t * 0.8 + d.bob) * 0.04, d.z);
+        const edge = 1 - Math.pow(Math.abs(x) / (SPAN / 2), 6);      // thin out at the wrap
+        sp.material.opacity = d.op * edge * vis;
+      });
+      glowMat.opacity = 0.55 * vis;
+      // Flash: quick bloom around u = 0.42, then a lingering soft halo.
+      const f = Math.exp(-Math.pow((u - 0.42) / 0.035, 2));
+      const halo = Math.exp(-Math.pow((u - 0.46) / 0.12, 2)) * 0.25;
+      flashMat.opacity = Math.min(f + halo, 1);
+      flash.scale.setScalar(1.4 + f * 2.2 + halo * 2);
+      starMat.opacity = f;
+      star.scale.setScalar(1.2 + f * 2.4);
+      star.material.rotation = t * 0.6;
+    }
+  };
+}
+
+/**
+ * A feathered wing, built the way a bird's is: long primaries fanning from
+ * the hand, secondaries along the forearm, two overlapping rows of coverts
+ * over their bases and a soft bulk along the leading edge. Every feather is
+ * a slightly cupped quad with a drawn vane (rachis, barbs, a rounded tip)
+ * cut out by alpha; all of them are merged into one mesh per wing.
+ *
+ * Local frame: the leading edge rises along +y, feathers trail along +x.
+ */
+let featherTex = null;
+function featherTexture() {
+  if (featherTex) return featherTex;
+  const c = document.createElement('canvas');
+  c.width = 64; c.height = 256;
+  const g = c.getContext('2d');
+  const outline = () => {
+    g.beginPath();
+    g.moveTo(30, 256);
+    g.bezierCurveTo(8, 200, 6, 60, 26, 8);
+    g.quadraticCurveTo(34, -2, 42, 10);
+    g.bezierCurveTo(60, 70, 58, 200, 36, 256);
+    g.closePath();
+  };
+  outline();
+  const body = g.createLinearGradient(0, 0, 0, 256);
+  body.addColorStop(0, '#f4f2f6'); body.addColorStop(0.5, '#ffffff'); body.addColorStop(1, '#e9e6ee');
+  g.fillStyle = body; g.fill();
+  g.save(); outline(); g.clip();
+  // barbs: fine diagonal lines, angled toward the tip
+  for (let y = -40; y < 280; y += 3) {
+    g.strokeStyle = `rgba(150,145,170,${0.08 + Math.random() * 0.08})`; g.lineWidth = 1;
+    g.beginPath(); g.moveTo(32, y + 16); g.lineTo(0, y); g.moveTo(32, y + 16); g.lineTo(64, y); g.stroke();
+  }
+  // a few splits in the vane
+  for (let i = 0; i < 5; i++) {
+    const y = 40 + Math.random() * 180, side = Math.random() < 0.5 ? -1 : 1;
+    g.strokeStyle = 'rgba(120,115,140,0.35)'; g.lineWidth = 1.2;
+    g.beginPath(); g.moveTo(32, y + 10); g.lineTo(32 + side * 30, y - 6); g.stroke();
+  }
+  g.restore();
+  // rachis
+  g.strokeStyle = 'rgba(175,168,190,0.9)'; g.lineWidth = 2;
+  g.beginPath(); g.moveTo(32, 256); g.quadraticCurveTo(31, 120, 33, 10); g.stroke();
+  featherTex = new THREE.CanvasTexture(c);
+  featherTex.colorSpace = THREE.SRGBColorSpace;
+  featherTex.anisotropy = 4;
+  return featherTex;
+}
+
+function buildWing(span = 1.0) {
+  const parts = [];
+  const feather = (x, y, angle, len, wid, z, cup = 0.05) => {
+    const geo = new THREE.PlaneGeometry(wid, len, 1, 5);
+    geo.translate(0, len / 2, 0);
+    const pos = geo.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      const k = pos.getY(i) / len;
+      pos.setZ(i, cup * k * k * len + Math.abs(pos.getX(i)) * -0.25);   // cupped and curving away
+    }
+    geo.computeVertexNormals();
+    geo.rotateZ(angle);
+    geo.translate(x, y, z);
+    parts.push(geo);
+  };
+  const lead = (y) => -0.1 * Math.sin(Math.PI * Math.min(y, 1));        // leading edge bows forward
+  // Secondaries: along the arm, trailing aft and a little down.
+  for (let i = 0; i < 20; i++) {
+    const k = i / 19, y = 0.04 + k * 0.5;
+    feather(lead(y) + 0.02, y, -Math.PI / 2 - 0.2 + k * 0.12, 0.5 + k * 0.1, 0.19, -0.004 * i);
+  }
+  // Primaries: from the hand, fanning from aft to nearly straight up.
+  for (let i = 0; i < 16; i++) {
+    const k = i / 15, y = 0.54 + k * 0.44;
+    const len = 0.66 + Math.sin(k * Math.PI * 0.8) * 0.3;
+    feather(lead(y) + 0.02, y, -Math.PI / 2 + 0.1 + k * 1.05, len, 0.18, -0.06 - 0.004 * i, 0.08);
+  }
+  // Greater and lesser coverts.
+  for (let i = 0; i < 22; i++) {
+    const k = i / 21, y = 0.02 + k * 0.92;
+    feather(lead(y) + 0.01, y, -Math.PI / 2 - 0.12 + k * (k > 0.55 ? 0.8 : 0.15), 0.32 - k * 0.06, 0.16, 0.02, 0.03);
+  }
+  for (let i = 0; i < 20; i++) {
+    const k = i / 19, y = 0.0 + k * 0.9;
+    feather(lead(y), y, -Math.PI / 2 + k * 0.35, 0.18, 0.14, 0.035, 0.02);
+  }
+  const geo = mergeGeometries(parts);
+  geo.scale(span, span, span);
+  const mat = new THREE.MeshStandardMaterial({
+    map: featherTexture(), alphaTest: 0.4, side: THREE.DoubleSide,
+    color: 0xffffff, roughness: 0.7, metalness: 0,
+    emissive: 0x3a3448, emissiveIntensity: 0.6
+  });
+  const m = new THREE.Mesh(geo, mat);
+  // leading-edge bulk
+  const edge = new THREE.CatmullRomCurve3(Array.from({ length: 8 }, (_, i) => {
+    const y = i / 7 * 0.98;
+    return new THREE.Vector3(lead(y) * span, y * span, 0.03 * span);
+  }));
+  const bulk = new THREE.Mesh(new THREE.TubeGeometry(edge, 24, 0.035 * span, 8), new THREE.MeshStandardMaterial({ color: 0xf6f4f8, roughness: 0.75, emissive: 0x3a3448, emissiveIntensity: 0.5 }));
+  const g = new THREE.Group();
+  g.add(m, bulk);
+  return g;
+}
+
+/**
+ * A pair of wings on a carrier, raised in a V over the withers. `at` is the
+ * withers in the carrier's space.
+ */
+function attachWings(carrier, at, span) {
+  const pair = [1, -1].map((side) => {
+    const hinge = group(at.x, at.y, at.z + side * 0.12);
+    const w = buildWing(span);
+    if (side < 0) w.scale.z = -1;                      // mirror, so the cupping faces out on both
+    hinge.add(w);
+    carrier.add(hinge);
+    w.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+    return { hinge, side };
+  });
+  return pair.map(({ hinge, side }) => ({
+    update(t) {
+      const beat = t * 2.6 + (side < 0 ? 0.25 : 0);
+      const flap = Math.sin(beat);
+      hinge.rotation.set(0, 0, 0);
+      hinge.rotateZ(-0.28 + flap * 0.1);                 // swept back, a little more on the downstroke
+      hinge.rotateX(side * (0.3 + flap * 0.32));         // spread out toward the viewer and away
+    }
+  }));
+}
+
 /**
  * Builds the coach. Everything is measured in the same units as the fitted
  * horse model (a horse is 3.3 long), with the ground at y = -1.45 and the
@@ -845,7 +1094,7 @@ function lathe(profile, segments = 28) {
  * always lands on the same feature at every height: the panels, windows and
  * mouldings are painted and modelled against one shared (u, v) map.
  */
-function buildStateCoach({ lowPower = false } = {}) {
+function buildStateCoach({ lowPower = false, fairy = false } = {}) {
   const root = group();
   const rig = group(-0.27, 0, 0);          // centre the long composition on the pivot
   root.add(rig);
@@ -990,8 +1239,10 @@ function buildStateCoach({ lowPower = false } = {}) {
   const hgts = document.createElement('canvas'); hgts.width = TW; hgts.height = TH;
   const C = cols.getContext('2d'), O = orms.getContext('2d'), H = hgts.getContext('2d');
   const X = (u) => u * TW, Y = (v) => (1 - v) * TH;
-  const GOLD_C = '#f1c25c', LAQ_C = '#5a0814';
-  const ORM_GOLD = 'rgb(0,62,255)', ORM_MATTE = 'rgb(0,150,255)', ORM_LAQ = 'rgb(0,70,0)';
+  // The fairy-tale coach is gold all over: its panels are a deeper, matte,
+  // chased gold where the state coach has crimson lacquer.
+  const GOLD_C = '#f1c25c', LAQ_C = fairy ? '#b98a34' : '#5a0814';
+  const ORM_GOLD = 'rgb(0,62,255)', ORM_MATTE = 'rgb(0,150,255)', ORM_LAQ = fairy ? 'rgb(0,125,255)' : 'rgb(0,70,0)';
   C.fillStyle = GOLD_C; C.fillRect(0, 0, TW, TH);
   O.fillStyle = ORM_GOLD; O.fillRect(0, 0, TW, TH);
   H.fillStyle = '#808080'; H.fillRect(0, 0, TW, TH);
@@ -1062,11 +1313,13 @@ function buildStateCoach({ lowPower = false } = {}) {
       ctx.quadraticCurveTo(cx - w, cy + h * 0.6, cx - w, cy + h * 0.1); ctx.closePath();
     };
     shield(C); C.save(); C.clip();
+    if (fairy) { C.fillStyle = '#d9a845'; C.fillRect(cx - w, cy - h, w * 2, h * 2); } else {
     C.fillStyle = '#a3182c'; C.fillRect(cx - w, cy - h, w, h * 2); C.fillStyle = '#16307e'; C.fillRect(cx, cy - h, w, h * 2);
     C.fillStyle = '#16307e'; C.fillRect(cx - w, cy + h * 0.1, w, h); C.fillStyle = '#a3182c'; C.fillRect(cx, cy + h * 0.1, w, h);
+    }
     C.restore();
     shield(C); C.strokeStyle = GOLD_C; C.lineWidth = 5; C.stroke();
-    shield(O); O.fillStyle = 'rgb(0,90,0)'; O.fill(); O.strokeStyle = ORM_GOLD; O.lineWidth = 5; O.stroke();
+    shield(O); O.fillStyle = fairy ? ORM_GOLD : 'rgb(0,90,0)'; O.fill(); O.strokeStyle = ORM_GOLD; O.lineWidth = 5; O.stroke();
     shield(H); H.strokeStyle = '#d8d8d8'; H.lineWidth = 6; H.stroke();
     // a crown over the shield
     const cy2 = cy - h * 0.72;
@@ -1193,7 +1446,25 @@ function buildStateCoach({ lowPower = false } = {}) {
   }
 
   // Windows: glass over a lit interior with velvet curtains.
-  const interior = (() => {
+  const interior = fairy ? (() => {
+    // Tinted teal glass: deep at the edges, lighter through the middle, with
+    // the soft diagonal reflections that make a pane read as glass.
+    const c = document.createElement('canvas'); c.width = 256; c.height = 320;
+    const g = c.getContext('2d');
+    const bg = g.createRadialGradient(128, 170, 10, 128, 170, 230);
+    bg.addColorStop(0, '#5fd6bf'); bg.addColorStop(0.55, '#1f8f86'); bg.addColorStop(1, '#0a3f45');
+    g.fillStyle = bg; g.fillRect(0, 0, 256, 320);
+    g.globalCompositeOperation = 'lighter';
+    for (const [x, w, a] of [[40, 70, 0.22], [130, 26, 0.16], [175, 12, 0.12]]) {
+      const gr = g.createLinearGradient(x, 0, x + w, 0);
+      gr.addColorStop(0, 'rgba(210,255,245,0)'); gr.addColorStop(0.5, `rgba(210,255,245,${a})`); gr.addColorStop(1, 'rgba(210,255,245,0)');
+      g.fillStyle = gr;
+      g.beginPath(); g.moveTo(x, 320); g.lineTo(x + w, 320); g.lineTo(x + w + 120, 0); g.lineTo(x + 120, 0); g.closePath(); g.fill();
+    }
+    g.globalCompositeOperation = 'source-over';
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+    return t;
+  })() : (() => {
     const c = document.createElement('canvas'); c.width = 256; c.height = 320;
     const g = c.getContext('2d');
     const bg = g.createRadialGradient(128, 150, 10, 128, 170, 220);
@@ -1236,7 +1507,7 @@ function buildStateCoach({ lowPower = false } = {}) {
     return new THREE.CanvasTexture(c);
   })();
   const GLASS = new THREE.MeshPhysicalMaterial({
-    map: interior, emissiveMap: interior, emissive: 0xffffff, emissiveIntensity: 0.3,
+    map: interior, emissiveMap: interior, emissive: 0xffffff, emissiveIntensity: fairy ? 0.42 : 0.3,
     roughness: 0.04, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.0, envMapIntensity: 1.7
   });
   const GLASS_ARCH = GLASS.clone(); GLASS_ARCH.alphaMap = archMask; GLASS_ARCH.alphaTest = 0.5;
@@ -1427,15 +1698,17 @@ function buildStateCoach({ lowPower = false } = {}) {
   // Splinter bar and pole.
   rig.add(mesh(new THREE.CylinderGeometry(0.03, 0.03, 1.9, 10), LACQUER, -0.05, -0.62, 0).rotateX(Math.PI / 2));
   [-0.95, 0.95].forEach((z) => rig.add(mesh(new THREE.SphereGeometry(0.04, 10, 8), GOLD, -0.05, -0.62, z)));
-  const poleCurve = new THREE.CatmullRomCurve3([new THREE.Vector3(0.35, -0.64, 0), new THREE.Vector3(-1.4, -0.5, 0), new THREE.Vector3(-3.25, -0.36, 0)]);
-  rig.add(new THREE.Mesh(taperTube(poleCurve, 0.045, 0.034, 40, 10), LACQUER));
-  rig.add(mesh(lathe([[0, 0], [0.045, 0], [0.05, 0.05], [0.03, 0.1], [0.04, 0.14], [0, 0.2]], 14), GOLD, -3.25, -0.36, 0).rotateZ(Math.PI / 2));
+  if (!fairy) {
+    const poleCurve = new THREE.CatmullRomCurve3([new THREE.Vector3(0.35, -0.64, 0), new THREE.Vector3(-1.4, -0.5, 0), new THREE.Vector3(-3.25, -0.36, 0)]);
+    rig.add(new THREE.Mesh(taperTube(poleCurve, 0.045, 0.034, 40, 10), LACQUER));
+    rig.add(mesh(lathe([[0, 0], [0.045, 0], [0.05, 0.05], [0.03, 0.1], [0.04, 0.14], [0, 0.2]], 14), GOLD, -3.25, -0.36, 0).rotateZ(Math.PI / 2));
+  }
 
   // ---------------------------------------------------------------- the team
   // Two slots, one each side of the pole. The engine drops the scanned horse
   // into them; until then (or if it never loads) a procedural horse stands in.
-  const TEAM_X = -2.1, TEAM_Z = 0.62;
-  const slots = [TEAM_Z, -TEAM_Z].map((z) => {
+  const TEAM_X = fairy ? -2.25 : -2.1, TEAM_Z = 0.62;
+  const slots = (fairy ? [0] : [TEAM_Z, -TEAM_Z]).map((z) => {
     const slot = group(TEAM_X, 0, z);
     rig.add(slot);
     return slot;
@@ -1448,11 +1721,14 @@ function buildStateCoach({ lowPower = false } = {}) {
   });
   // Traces: leather straps from each horse's shoulder back to the bar.
   const traces = [];
-  for (const [si, z] of [[0, TEAM_Z + 0.3], [0, TEAM_Z - 0.3], [1, -TEAM_Z + 0.3], [1, -TEAM_Z - 0.3]]) {
-    const m = mesh(new THREE.BoxGeometry(0.014, 1, 0.05), LEATHER);
+  const traceSet = fairy ? [[0, 0.3], [0, -0.3]] : [[0, TEAM_Z + 0.3], [0, TEAM_Z - 0.3], [1, -TEAM_Z + 0.3], [1, -TEAM_Z - 0.3]];
+  for (const [si, z] of traceSet) {
+    // Gilded traces for the winged horse; plain leather for the state pair.
+    const m = mesh(fairy ? new THREE.CylinderGeometry(0.018, 0.018, 1, 8) : new THREE.BoxGeometry(0.014, 1, 0.05), fairy ? GOLD : LEATHER);
     rig.add(m);
     traces.push({ m, slot: si, z, from: new THREE.Vector3(TEAM_X - 0.72, -0.42, z), to: new THREE.Vector3(-0.05, -0.62, z * 0.95 + (z > 0 ? 0.02 : -0.02)) });
   }
+  const sky = fairy ? buildCloudBed(rig, GROUND, lowPower, new THREE.Vector3(TEAM_X - 0.9, -0.2, 0.3)) : null;
 
   const UP = new THREE.Vector3(0, 1, 0), dirV = new THREE.Vector3(), mid = new THREE.Vector3();
   function strap(m, a, b) {
@@ -1464,6 +1740,7 @@ function buildStateCoach({ lowPower = false } = {}) {
     m.quaternion.setFromUnitVectors(UP, dirV.normalize());
   }
   const bob = [new THREE.Vector3(), new THREE.Vector3()];
+  const pitchQ = new THREE.Vector3();
   const fromNow = new THREE.Vector3();
 
   return {
@@ -1481,10 +1758,26 @@ function buildStateCoach({ lowPower = false } = {}) {
       const beat = t * 6.6;
       if (fallback) fallback.forEach((h) => h.update(t, u, { speed: 6.6, gait: 0.6 }));
       (this.carriers || []).forEach((c, i) => {
+        if (fairy && c.userData.pivot) {
+          // Rearing: the body pitches up about the hind hooves, rocking as
+          // the forelegs paw the air.
+          const a = -(0.3 + Math.sin(t * 3.4) * 0.07);
+          const pv = c.userData.pivot, k = c.userData.scale ?? 1;
+          c.rotation.z = a;
+          c.scale.setScalar(k);
+          // hooves stay where they stand while the body scales and pitches
+          pitchQ.set(pv.x * k, pv.y * k, 0).applyAxisAngle(new THREE.Vector3(0, 0, 1), a);
+          c.position.x = pv.x - pitchQ.x;
+          c.position.y = pv.y - pitchQ.y + Math.sin(t * 3.4) * 0.03;
+          c.userData.wings?.forEach((w) => w.update(t));
+          bob[i].set(0, 0.18, 0);
+          return;
+        }
         c.position.y = Math.abs(Math.sin(beat)) * 0.06;
         c.rotation.z = Math.sin(beat * 2 + i * 0.4) * 0.02;
         bob[i].set(0, c.position.y, 0);
       });
+      sky?.update(t, u);
       // Wheels roll by the distance covered, in rig units.
       const dist = (ctx.travel ?? t * 2) / (ctx.scale ?? 1);
       wheels.forEach((w) => { w.spin.rotation.y = w.dir * dist / w.r; });
@@ -1944,7 +2237,12 @@ class Sparkles {
  * they were kicked, so as the ride moves on they trail naturally behind it.
  */
 class Dust {
-  constructor(count) {
+  constructor(count, opts = {}) {
+    this.opts = {
+      additive: false, color: [0.25, 0.2, 0.15], map: TEX.smoke, size: [0.3, 1.55],
+      alpha: 0.17, life: [0.9, 1.7], rise: [0.12, 0.34], flicker: 0, ...opts
+    };
+    this.wind = 0;
     this.n = count;
     this.cursor = 0;
     this.pos = new Float32Array(count * 3);
@@ -1960,14 +2258,15 @@ class Dust {
     geo.setAttribute('aAlpha', new THREE.BufferAttribute(this.alpha, 1).setUsage(THREE.DynamicDrawUsage));
     geo.setAttribute('aSpin', new THREE.BufferAttribute(this.spin, 1));
     this.uniforms = {
-      uMap: { value: TEX.smoke },
-      uColor: { value: new THREE.Color(0.25, 0.2, 0.15) },
+      uMap: { value: this.opts.map },
+      uColor: { value: new THREE.Color(...this.opts.color) },
       uScale: { value: 400 }
     };
     this.points = new THREE.Points(geo, new THREE.ShaderMaterial({
       uniforms: this.uniforms,
       transparent: true,
       depthWrite: false,
+      blending: this.opts.additive ? THREE.AdditiveBlending : THREE.NormalBlending,
       vertexShader: `
         attribute float aSize; attribute float aAlpha; attribute float aSpin;
         uniform float uScale;
@@ -1998,11 +2297,12 @@ class Dust {
     this.pos[i * 3] = at.x + (Math.random() - 0.5) * spread;
     this.pos[i * 3 + 1] = at.y + Math.random() * 0.05;
     this.pos[i * 3 + 2] = at.z + (Math.random() - 0.5) * spread;
+    const o = this.opts;
     this.vel[i * 3] = drift + (Math.random() - 0.5) * 0.35;
-    this.vel[i * 3 + 1] = 0.12 + Math.random() * 0.22;
+    this.vel[i * 3 + 1] = lerp(o.rise[0], o.rise[1], Math.random());
     this.vel[i * 3 + 2] = (Math.random() - 0.5) * 0.35;
     this.age[i] = 0;
-    this.life[i] = 0.9 + Math.random() * 0.8;
+    this.life[i] = lerp(o.life[0], o.life[1], Math.random());
     this.spin[i] = Math.random() * 6.28;
     this.points.geometry.attributes.aSpin.needsUpdate = true;
   }
@@ -2014,11 +2314,13 @@ class Dust {
       const k = Math.min(age[i] / life[i], 1);
       const drag = Math.exp(-2.2 * dt);
       vel[i * 3] *= drag; vel[i * 3 + 1] *= drag; vel[i * 3 + 2] *= drag;
-      pos[i * 3] += vel[i * 3] * dt;
+      pos[i * 3] += (vel[i * 3] + this.wind) * dt;   // wind: the ground streaming past
       pos[i * 3 + 1] += vel[i * 3 + 1] * dt;
       pos[i * 3 + 2] += vel[i * 3 + 2] * dt;
-      size[i] = 0.3 + Math.sqrt(k) * 1.25;            // billows out fast, then slows
-      alpha[i] = Math.min(k * 5, 1) * Math.pow(1 - k, 1.8) * 0.17 * strength;
+      const o = this.opts;
+      size[i] = lerp(o.size[0], o.size[1], Math.sqrt(k));   // billows out fast, then slows
+      const flick = o.flicker ? 1 - o.flicker + o.flicker * Math.abs(Math.sin(age[i] * 37 + i)) : 1;
+      alpha[i] = Math.min(k * 5, 1) * Math.pow(1 - k, 1.8) * o.alpha * strength * flick;
     }
     const g = this.points.geometry;
     g.attributes.position.needsUpdate = true;
@@ -2026,6 +2328,161 @@ class Dust {
     g.attributes.aAlpha.needsUpdate = true;
   }
   clear() { this.age.fill(1); this.alpha.fill(0); }
+}
+
+/* ------------------------------------------------------------------ *
+ * Scene cards — full-frame backdrops behind a ride
+ * ------------------------------------------------------------------ */
+
+/**
+ * The golden-hour card from the reference: a low sun behind the rider, cloud
+ * banks lit from underneath, three ranges of mountains in atmospheric haze,
+ * and a thin bright line under the ground. Everything is procedural (value
+ * noise and fbm), so it costs no download and never repeats visibly.
+ *
+ * The ranges scroll at different speeds with `uScroll`, which is how a horse
+ * holding the centre of the frame still reads as galloping hard: the near
+ * ridge races past, the far one barely moves. The top edge feathers into the
+ * room and the whole card fades with `uAlpha`.
+ */
+const SUNSET_FRAG = `
+  uniform float uT, uScroll, uAlpha, uAspect;
+  varying vec2 vUv;
+
+  float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+  float noise(vec2 p) {
+    vec2 i = floor(p), f = fract(p);
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    return mix(mix(hash(i), hash(i + vec2(1, 0)), u.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), u.x), u.y);
+  }
+  float fbm(vec2 p) {
+    float v = 0.0, a = 0.5;
+    for (int i = 0; i < 5; i++) { v += a * noise(p); p = p * 2.03 + vec2(17.1, 9.2); a *= 0.5; }
+    return v;
+  }
+  // Ridged multifractal: sharp crests and gullies, like real ranges.
+  float ridge(float x, float base, float amp, float freq, float seed) {
+    float v = 0.0, a = 0.55, f = freq;
+    for (int i = 0; i < 6; i++) {
+      float n = 1.0 - abs(noise(vec2(x * f, seed + float(i) * 7.3)) * 2.0 - 1.0);
+      v += a * n * n;
+      f *= 2.15; a *= 0.48;
+    }
+    return base + amp * v;
+  }
+
+  void main() {
+    vec2 uv = vUv;
+    vec2 p = vec2(uv.x * uAspect, uv.y);
+    vec2 sun = vec2(0.34 * uAspect, 0.5);
+    float horizon = 0.4;
+
+    // Sky: a blinding gold streak at the horizon, ember orange, blood red
+    // cloud banks, then deep blue where the card meets the room.
+    float h = clamp((uv.y - horizon) / (1.0 - horizon), 0.0, 1.0);
+    // Away from the sun the sky is already dusk: wine red over the hills,
+    // bruised plum higher up, night blue at the top.
+    vec3 sky = mix(vec3(0.34, 0.07, 0.02), vec3(0.08, 0.015, 0.03), smoothstep(0.0, 0.5, h));
+    sky = mix(sky, vec3(0.012, 0.018, 0.09), smoothstep(0.5, 1.0, h));
+
+    // The sun: a white-gold core, a gold glow smeared sideways the way a
+    // lens smears a low sun, and a broad ember halo.
+    vec2 ds = (p - sun) * vec2(0.5, 1.0);
+    float d = length(ds);
+    sky += vec3(3.0, 2.4, 1.2) * smoothstep(0.05, 0.028, length(p - sun));
+    float di = length(p - sun);
+    sky += vec3(2.4, 1.5, 0.45) * exp(-d * 12.0);
+    sky += vec3(1.4, 0.55, 0.06) * exp(-di * 6.5);
+    sky += vec3(0.35, 0.08, 0.008) * exp(-di * 2.6);
+    float streak = exp(-abs(uv.y - sun.y + 0.01) * 30.0) * exp(-abs(p.x - sun.x) * 3.2);
+    sky += vec3(1.1, 0.55, 0.08) * streak;
+    // Crepuscular rays fanning out of the sun.
+    float ang = atan(p.y - sun.y, p.x - sun.x);
+    float rays = pow(noise(vec2(ang * 9.0, 1.3)), 3.0) * exp(-di * 3.5) * smoothstep(horizon, horizon + 0.12, uv.y);
+    sky += vec3(1.0, 0.42, 0.05) * rays * 0.25;
+
+    // Cloud banks: long streaky fbm. Near the sun they are lit gold from
+    // below; away from it they are dark wine-red against the glow.
+    float cx = uv.x * 1.5 - uScroll * 0.012 + uT * 0.004;
+    vec2 cq = vec2(cx, uv.y * 9.0);
+    cq += vec2(fbm(cq * 1.7 + 3.1) * 0.9, fbm(cq * 1.3 + 8.4) * 0.6);      // domain warp: torn, wind-drawn shapes
+    float c = fbm(cq);
+    float band = smoothstep(horizon + 0.05, horizon + 0.13, uv.y) * (1.0 - smoothstep(0.78, 0.96, uv.y));
+    float cloud = smoothstep(0.4, 0.62, c) * band;
+    float lit = exp(-di * 4.2);
+    float under = smoothstep(0.62, 0.4, c);                                  // thin edges catch the light
+    vec3 cloudCol = mix(vec3(0.07, 0.01, 0.014), vec3(0.9, 0.3, 0.04), lit * 0.8);
+    cloudCol += vec3(2.2, 1.0, 0.18) * under * lit;
+    cloudCol += vec3(0.25, 0.05, 0.01) * under * (1.0 - lit) * (1.0 - h);   // ember rim far from the sun
+    sky = mix(sky, cloudCol, cloud * 0.92);
+
+    vec3 col = sky;
+
+    // Three ranges, far to near. Far ones take the sky colour (aerial haze).
+    float x = uv.x;
+    float sx1 = x - uScroll * 0.006, sx2 = x - uScroll * 0.016, sx3 = x - uScroll * 0.045;
+    float r1 = ridge(sx1, 0.33, 0.1, 1.7, 3.0);
+    float r2 = ridge(sx2, 0.27, 0.11, 2.4, 11.0);
+    float r3 = ridge(sx3, 0.18, 0.1, 3.4, 23.0);
+    float sunSide = exp(-abs(x - 0.34) * 2.2);
+    vec3 haze = mix(vec3(0.95, 0.34, 0.05), vec3(0.22, 0.06, 0.09), smoothstep(0.0, 0.4, abs(x - 0.34)));
+    if (uv.y < r1) {
+      float rock = fbm(vec2(sx1 * 30.0, uv.y * 24.0));
+      col = mix(vec3(0.09, 0.03, 0.05), haze, 0.42 - (r1 - uv.y) * 1.5);
+      col *= 0.8 + 0.4 * rock;
+      col += vec3(0.9, 0.3, 0.04) * exp(-(r1 - uv.y) * 40.0) * sunSide * 0.3;
+    }
+    if (uv.y < r2) {
+      float rock = fbm(vec2(sx2 * 34.0, uv.y * 30.0));
+      col = mix(vec3(0.02, 0.008, 0.01), haze, 0.08 - (r2 - uv.y) * 0.3);
+      col *= 0.7 + 0.6 * rock;
+      col += vec3(1.1, 0.36, 0.05) * exp(-(r2 - uv.y) * 70.0) * sunSide * 0.22;
+    }
+    if (uv.y < r3) {
+      float rock = fbm(vec2(sx3 * 45.0, uv.y * 50.0));
+      col = vec3(0.012, 0.007, 0.006) * (0.6 + 0.9 * rock);
+      col += vec3(1.2, 0.4, 0.05) * exp(-(r3 - uv.y) * 90.0) * sunSide * 0.18;
+      float g = fbm(vec2(sx3 * 60.0, uv.y * 90.0));
+      col += vec3(0.05, 0.02, 0.006) * g * smoothstep(0.05, r3, uv.y);
+    }
+
+    // The low sun washing over everything near the horizon.
+    float band2 = exp(-abs(uv.y - horizon - 0.03) * 9.0);
+    col += vec3(1.5, 0.75, 0.12) * band2 * exp(-abs(x - 0.34) * 1.4) * 0.6 * step(r1, uv.y + 0.02);
+    col += vec3(0.8, 0.3, 0.04) * exp(-abs(uv.y - horizon) * 10.0) * exp(-abs(x - 0.34) * 1.8) * 0.3;
+
+    // The bright line under the ground, with a glint running along it.
+    float lineY = 0.105;
+    float line = exp(-abs(uv.y - lineY) * 420.0) * 1.6 + exp(-abs(uv.y - lineY) * 60.0) * 0.25;
+    float glint = exp(-pow((uv.x - fract(uT * 0.22)) * 6.0, 2.0));
+    col += vec3(0.75, 0.85, 1.6) * line * (0.7 + glint);
+
+    // Feather into the room: soft at the top, quick below the line.
+    float a = smoothstep(1.0, 0.8, uv.y) * smoothstep(lineY - 0.05, lineY + 0.005, uv.y);
+    a = max(a, line * 0.9);
+    float alpha = clamp(a, 0.0, 1.0) * uAlpha;
+    gl_FragColor = vec4(col * alpha, alpha);
+  }
+`;
+
+function buildBackdrop() {
+  const uniforms = {
+    uT: { value: 0 }, uScroll: { value: 0 }, uAlpha: { value: 0 }, uAspect: { value: 1.2 }
+  };
+  // Opaque pass, drawn first, writing premultiplied colour. As a transparent
+  // object it would be drawn after the rider and paint straight over him.
+  const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({
+    uniforms,
+    transparent: false,
+    depthTest: false,
+    depthWrite: false,
+    vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.9999, 1.0); }',
+    fragmentShader: SUNSET_FRAG
+  }));
+  quad.frustumCulled = false;
+  quad.renderOrder = -100;               // drawn first, everything else over it
+  quad.visible = false;
+  return { quad, uniforms };
 }
 
 /* ------------------------------------------------------------------ *
@@ -2046,9 +2503,20 @@ const ENTRIES = {
   horse: {
     label: 'Horse rider',
     photoreal: true,
+    // As in the reference: a golden-hour card behind the rider; the horse
+    // runs in from the right, then holds the centre at full gallop while the
+    // land streams past, and the whole scene fades together.
+    backdrop: 'sunset',
+    fadeCanvas: true,
+    fade: [0.1, 0.86],
+    lights: {
+      key: [0xffb878, 0.95], keyOffset: [-4.5, 2.2, 6],
+      rim: [0xff8a30, 7.5, [-2.2, 1.6, -7]],        // the low sun, behind the rider
+      sky: 0.16, env: 0.42
+    },
     accent: 0xffa845,
     trail: { color: 0xff8a1e, width: 0.12, span: 0.09 },
-    scale: 0.95, y: -0.44,
+    scale: 1.34, y: -0.4,
     build: () => buildHorse({ coat: MAT.coatWarm, rider: true }),
     // assets/models/horse.glb faces +z, so a quarter turn puts it on the path.
     model: {
@@ -2066,49 +2534,56 @@ const ENTRIES = {
       surface: { rider: { minZ: -0.28, maxZ: 0.44, minY: -0.66 } }
     },
     pool: 0xffa23c,
-    dust: { rate: 16, points: [[-0.72, -1.42, 0.02], [-0.72, -1.42, 0.24], [0.34, -1.42, 0.02], [0.34, -1.42, 0.24]] },
+    dust: { rate: 18, wind: 2.6, points: [[-0.72, -1.42, 0.02], [-0.72, -1.42, 0.24], [0.34, -1.42, 0.02], [0.34, -1.42, 0.24]] },
+    embers: { rate: 38, points: [[0.3, -1.4, 0.1], [0.45, -1.35, 0.25], [-0.7, -1.4, 0.15]], glow: [0.55, -1.25, 0.3] },
     path(u) {
-      const x = crossing(u, 7.2, -7.6, 0.15, 0.3, 0.66, 0.5);
+      const k = easeOut(clamp(u / 0.24, 0, 1));
       return {
-        x, y: 0, z: lerp(-1.1, 0.9, u),
-        ry: -0.34 + Math.sin(u * Math.PI) * 0.12,
+        x: lerp(6.2, -0.35, k), y: 0, z: 0.35,
+        ry: lerp(-0.2, -0.3, k),
         rz: 0,
-        travel: (7.2 - x)
+        // the land keeps streaming past after the horse settles
+        travel: u * 44
       };
     }
   },
   carriage: {
     label: 'Royal rath',
     photoreal: true,
+    // As in the reference: a golden coach drawn by a single white winged
+    // horse, rearing, riding a luminous cloud bank. It glides in from the
+    // right as it fades up, holds centre stage, flashes, and fades away.
+    fadeCanvas: true,
+    fade: [0.16, 0.86],
+    lights: {
+      key: [0xfff1e0, 1.25], keyOffset: [3.5, 4.5, 6],
+      rim: [0xd9c2ff, 5.5, [-2.5, 2.5, -6]],
+      sky: 0.35, env: 0.9
+    },
     accent: 0xe0a6ff,
     trail: { color: 0xc98bff, width: 0.14, span: 0.08 },
-    scale: 0.66, y: -0.873,
-    contact: [2.1, 1.35],
-    build: () => buildStateCoach({ lowPower: ENGINE.lowPower }),
+    scale: 0.72, y: -0.5,
+    contact: [0, 0],
+    build: () => buildStateCoach({ lowPower: ENGINE.lowPower, fairy: true }),
     pool: 0xd79bff,
-    // A pair of the scanned horse in the shafts, tinted grey-white and trotting.
+    // The scanned horse, rider cut away, white with a golden mane and tail,
+    // given a pair of feathered wings and rearing in the traces.
     team: {
       model: 'horse',
-      plume: { at: [0.059, 0.1, 0.74], color: 0xa3172e, scale: 0.95 },
-      surface: { rider: { minZ: -0.28, maxZ: 0.44, minY: -0.66 }, tint: 'white' },
+      rear: true,
+      wings: { at: [0.068, -0.2, 0.2], span: 1.25 },
+      scale: 1.2,
+      surface: { rider: { minZ: -0.28, maxZ: 0.44, minY: -0.66 }, tint: 'white', mane: 'gold', steel: 'gold', noRider: { torso: [-0.12, 0.25, -0.1], legs: [-0.12, 0.36, -0.66] } },
       gallop: {
         belly: -0.64, legLength: 0.36, split: 0.10,
         frontHipZ: 0.38, hindHipZ: -0.18, tailZ: -0.50, midX: 0.068,
-        speed: 6.6, swing: 0.6, phases: [Math.PI, 0, 0, Math.PI]
+        speed: 3.4, swing: 0.3, phases: [0.0, 1.2, 0.0, 0.4], rear: true
       }
     },
-    dust: { rate: 22, points: [
-      [-3.07, -1.42, 0.55], [-3.07, -1.42, -0.55], [-2.04, -1.42, 0.7], [-2.04, -1.42, -0.7],
-      [0.28, -1.42, 0.96], [3.28, -1.42, 0.96], [0.28, -1.42, -0.96], [3.28, -1.42, -0.96]
-    ] },
     path(u) {
-      const x = crossing(u, 8.8, -9.4, 0.1, 0.32, 0.7, 0.4);
-      return {
-        x, y: 0, z: lerp(-1.4, 0.7, u),
-        ry: -0.3 + Math.sin(u * Math.PI) * 0.1,
-        rz: 0,
-        travel: (8.8 - x)
-      };
+      const k = easeOut(clamp(u / 0.3, 0, 1));
+      const x = lerp(2.6, -0.2, k) - Math.max(0, u - 0.3) * 0.6;
+      return { x, y: Math.sin(u * 5.2) * 0.04, z: 0.2, ry: -0.16, rz: 0, travel: (2.6 - x) * 2.2 + u * 6 };
     }
   },
   bike: {
@@ -2253,6 +2728,17 @@ export function createEntryEngine(canvas, opts = {}) {
   const dust = new Dust(lowPower ? 90 : 200);
   stage.add(dust.points);
   const dustAt = new THREE.Vector3();
+  // Embers flicking off the hooves, as in the reference card.
+  const embers = new Dust(lowPower ? 60 : 140, {
+    additive: true, color: [3.2, 1.25, 0.32], map: TEX.spark, size: [0.09, 0.02],
+    alpha: 0.95, life: [0.35, 0.9], rise: [0.25, 1.0], flicker: 0.6
+  });
+  stage.add(embers.points);
+  const hoofGlow = mesh(new THREE.PlaneGeometry(1.6, 0.9), additive(0xff8a2a, 0, TEX.spark));
+  hoofGlow.renderOrder = 6;
+  stage.add(hoofGlow);
+  const backdrop = buildBackdrop();
+  scene.add(backdrop.quad);
 
   const ambient = new Sparkles(lowPower ? 60 : 130, 0xffe2ad, 0.1);
   stage.add(ambient.points);
@@ -2275,6 +2761,27 @@ export function createEntryEngine(canvas, opts = {}) {
   const composer = new EffectComposer(renderer);
   composer.addPass(new RenderPass(scene, camera));
   const bloom = new UnrealBloomPass(new THREE.Vector2(512, 512), lowPower ? 0.28 : 0.42, 0.5, 0.9);
+  // UnrealBloomPass blends its result with additive blending, whose alpha
+  // term is srcAlpha * srcAlpha + dstAlpha. The bloom target's alpha is 1
+  // everywhere, so every transparent pixel of the frame came out fully
+  // opaque and the ride sat in a black box over the room. Add light, not
+  // opacity: RGB still adds, and alpha rises only by how bright the bloom
+  // actually is at that pixel, which is what lets a glow spill over the page.
+  bloom.blendMaterial.transparent = true;
+  bloom.blendMaterial.blending = THREE.CustomBlending;
+  bloom.blendMaterial.blendEquation = THREE.AddEquation;
+  bloom.blendMaterial.blendSrc = THREE.OneFactor;
+  bloom.blendMaterial.blendDst = THREE.OneFactor;
+  bloom.blendMaterial.blendSrcAlpha = THREE.OneFactor;
+  bloom.blendMaterial.blendDstAlpha = THREE.OneFactor;
+  bloom.blendMaterial.fragmentShader = `
+    uniform float opacity;
+    uniform sampler2D tDiffuse;
+    varying vec2 vUv;
+    void main() {
+      vec4 c = texture2D(tDiffuse, vUv) * opacity;
+      gl_FragColor = vec4(c.rgb, dot(c.rgb, vec3(0.2126, 0.7152, 0.0722)));
+    }`;
   composer.addPass(bloom);
   composer.addPass(new OutputPass());
 
@@ -2294,7 +2801,7 @@ export function createEntryEngine(canvas, opts = {}) {
       hero: 4, under: 1, sky: 0.45, pool: 1, fx: 1, rays: 1, trail: true, dust: false, shadowSpan: 3.6
     },
     photoreal: {
-      toneMapping: THREE.AgXToneMapping, exposure: 1.18, env: studioEnv,
+      toneMapping: THREE.NeutralToneMapping, exposure: 1.0, env: studioEnv,
       bloom: [0.1, 0.3, 0.97],
       key: [0xffe0bc, 3.0], keyOffset: [-4.2, 3.6, 5.4], rim: [0xa9c6ff, 2.6],
       hero: 0, under: 0, sky: 0.28, pool: 0.22, fx: 0, rays: 0.45, trail: false, dust: true, shadowSpan: 5.4
@@ -2306,6 +2813,7 @@ export function createEntryEngine(canvas, opts = {}) {
     renderer.toneMapping = look.toneMapping;
     renderer.toneMappingExposure = look.exposure;
     scene.environment = look.env;
+    scene.environmentIntensity = 1;
     [bloom.strength, bloom.radius, bloom.threshold] = look.bloom;
     key.color.setHex(look.key[0]); key.intensity = look.key[1];
     rim.color.setHex(look.rim[0]); rim.intensity = look.rim[1];
@@ -2435,6 +2943,9 @@ export function createEntryEngine(canvas, opts = {}) {
   function applyRealisticSurface(model, opts) {
     const r = opts.rider;
     const white = opts.tint === 'white';
+    const cut = opts.noRider;               // model-space height above which the rider is cut away
+    const gold = opts.mane === 'gold';
+    const gildTack = opts.steel === 'gold';
     const key = `surface:${JSON.stringify(opts)}`;
     const vDecl = 'varying vec3 vRestPos;';
     const frag = `
@@ -2451,34 +2962,66 @@ export function createEntryEngine(canvas, opts = {}) {
           * (1.0 - smoothstep(${r.maxZ.toFixed(3)}, ${(r.maxZ + 0.04).toFixed(3)}, p.z))
           * smoothstep(${(r.minY - 0.04).toFixed(3)}, ${r.minY.toFixed(3)}, p.y);
 
-        float steel = (1.0 - smoothstep(0.12, 0.30, sat)) * smoothstep(0.03, 0.10, lum) * inRider;
+        ${cut != null ? `{
+          // Measured off the mesh: above the saddle, between cantle and
+          // withers, everything is rider; lower down, along the flank, only
+          // the grey of the armoured legs is, so the horse itself survives.
+          float steelLike = (1.0 - smoothstep(0.12, 0.30, sat)) * smoothstep(0.03, 0.10, lum);
+          bool torso = p.z > ${cut.torso[0].toFixed(3)} && p.z < ${cut.torso[1].toFixed(3)} && p.y > ${cut.torso[2].toFixed(3)};
+          bool legs = p.z > ${cut.legs[0].toFixed(3)} && p.z < ${cut.legs[1].toFixed(3)} && p.y > ${cut.legs[2].toFixed(3)} && steelLike > 0.5;
+          // Nothing of the horse stands higher than its ears (y 0.15); the
+          // raised sword does, well forward of the torso.
+          if (torso || legs || p.y > 0.2) discard;
+        }` : ''}
+        float steel = (1.0 - smoothstep(0.12, 0.30, sat)) * smoothstep(0.03, 0.10, lum) * inRider${cut != null && !gildTack ? ' * 0.0' : ''};
         float dark  = (1.0 - smoothstep(0.03, 0.075, lum)) * (1.0 - steel);
         float coat  = clamp(1.0 - steel - dark, 0.0, 1.0);
 
         // Steel: bring the grey up to real steel reflectance, keep the
         // texture's engraving and wear as variation, polish the plate.
-        vec3 steelCol = vec3(0.60, 0.61, 0.64) * clamp(0.55 + lum * 1.6, 0.45, 1.15);
-        float steelRough = 0.2 + (1.0 - smoothstep(0.08, 0.4, lum)) * 0.22;
+        ${gildTack
+          ? `vec3 steelCol = vec3(0.86, 0.62, 0.22) * clamp(0.6 + lum * 1.5, 0.5, 1.2);
+             float steelRough = 0.24 + (1.0 - smoothstep(0.08, 0.4, lum)) * 0.16;`
+          : `vec3 steelCol = vec3(0.60, 0.61, 0.64) * clamp(0.55 + lum * 1.6, 0.45, 1.15);
+             float steelRough = 0.2 + (1.0 - smoothstep(0.08, 0.4, lum)) * 0.22;`}
 
         // Coat.
         ${white
-          ? `float hair = clamp(0.42 + lum * 2.7, 0.32, 1.22);
-             vec3 coatCol = vec3(0.80, 0.78, 0.74) * hair;
+          ? `float hair = clamp(0.78 + lum * 1.2, 0.74, 1.2);
+             vec3 coatCol = vec3(0.94, 0.93, 0.92) * hair;
              float coatRough = 0.56;`
           : `vec3 coatCol = c * vec3(0.84, 0.70, 0.60);
              float coatRough = 0.46;`}
 
         // Leather and hair that is darker than the coat.
-        vec3 darkCol = c * 0.92;
+        vec3 darkCol = ${white ? 'coatCol * 0.9' : 'c * 0.92'};
         ${white
           ? `float maneZone = max(step(0.42, p.z) * step(-0.36, p.y), step(p.z, -0.45));
-             darkCol = mix(darkCol, vec3(0.52, 0.52, 0.53) * clamp(0.6 + lum * 6.0, 0.5, 1.1), maneZone);`
+             darkCol = mix(darkCol, vec3(0.52, 0.52, 0.53) * clamp(0.6 + lum * 6.0, 0.5, 1.1), maneZone);
+`
           : ''}
         float darkRough = 0.5;
 
         diffuseColor.rgb = steelCol * steel + coatCol * coat + darkCol * dark;
         metalnessFactor = steel * 0.96;
         roughnessFactor = steelRough * steel + coatRough * coat + darkRough * dark;
+        ${gold ? `{
+          // Mane and forelock are the dark hair along the crest; the tail is
+          // the whole switch behind the rump. Both become spun gold.
+          float m = max(step(0.40, p.z) * step(-0.34, p.y) * dark, step(p.z, -0.44)) * (1.0 - steel);
+          vec3 goldHair = vec3(1.0, 0.72, 0.26) * clamp(0.5 + lum * 1.8, 0.45, 1.35);
+          diffuseColor.rgb = mix(diffuseColor.rgb, goldHair, m);
+          roughnessFactor = mix(roughnessFactor, 0.4, m);
+          // Harness: saddle, girth, breastcollar and bridle are the dark
+          // texels over the barrel and the head — gilded, like the reference.
+          float tack = dark * max(
+            step(-0.25, p.z) * step(p.z, 0.45) * step(-0.46, p.y),
+            step(0.58, p.z));
+          tack = clamp(tack * 1.6, 0.0, 1.0) * (1.0 - m);
+          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.88, 0.64, 0.2), tack);
+          metalnessFactor = max(metalnessFactor, tack * 0.9);
+          roughnessFactor = mix(roughnessFactor, 0.28, tack);
+        }` : ''}
       }
     `;
     model.traverse((o) => {
@@ -2493,6 +3036,7 @@ export function createEntryEngine(canvas, opts = {}) {
           if (n) { m.normalMap = n; m.normalScale.set(0.7, 0.7); }
         }
         m.envMapIntensity = 1;
+        if (cut != null) m.side = THREE.DoubleSide;     // the cut leaves openings; show the far wall, not nothing
         addShaderPatch(m, key, (shader) => {
           shader.vertexShader = shader.vertexShader
             .replace('#include <common>', `#include <common>\n${vDecl}`)
@@ -2559,6 +3103,17 @@ export function createEntryEngine(canvas, opts = {}) {
       '    -(0.10 + max(0.0, sin(a - 1.05)) * 0.70) * clamp((w - 0.45) / 0.55, 0.0, 1.0)',
       '  );',
       '}',
+      '// Rearing: forelegs raised and folded, pawing; hind legs planted.',
+      'vec2 rearFore(float phase, float w) {',
+      '  float a = uT * SPEED + phase;',
+      '  float kneeW = clamp((w - 0.4) / 0.6, 0.0, 1.0);',
+      '  return vec2((-1.45 + sin(a) * SWING) * min(w * 1.8, 1.0), (1.85 + sin(a - 0.8) * 0.3) * kneeW);',
+      '}',
+      'vec2 rearHind(float phase, float w) {',
+      '  float a = uT * SPEED + phase;',
+      '  return vec2((-0.28 + sin(a) * 0.05) * w, 0.12 * clamp((w - 0.45) / 0.55, 0.0, 1.0));',
+      '}',
+      `#define REAR ${g.rear ? 1 : 0}`,
       '',
       '// The animal\'s midline is MIDX, measured off the leg clusters: a rider\'s',
       '// outstretched arm shifts the bounding box, so x = 0 is not the middle.',
@@ -2574,8 +3129,13 @@ export function createEntryEngine(canvas, opts = {}) {
       '  w *= smoothstep(0.004, 0.024, abs(sx));',
       '  float side = smoothstep(-0.02, 0.02, sx);',
       '  float fore = smoothstep(SPLIT - 0.09, SPLIT + 0.09, rest.z);',
+      '#if REAR',
+      '  vec2 front = mix(rearFore(PFL, w), rearFore(PFR, w), side);',
+      '  vec2 hind  = mix(rearHind(PHL, w), rearHind(PHR, w), side);',
+      '#else',
       '  vec2 front = mix(legAngles(PFL, w), legAngles(PFR, w), side);',
       '  vec2 hind  = mix(legAngles(PHL, w), legAngles(PHR, w), side);',
+      '#endif',
       '  ang  = mix(hind, front, fore);',
       '  hipZ = mix(HINDZ, FRONTZ, fore);',
       '}',
@@ -2954,6 +3514,31 @@ export function createEntryEngine(canvas, opts = {}) {
       const fit = fitModel(first, horseSpec);
       applyRealisticSurface(first, team.surface);
       const time = applyGallopShader(first, team.gallop);
+      const cut = team.surface?.noRider;
+      if (cut) {
+        // The shadow pass must not see the rider either, or an invisible
+        // knight shades the horse's back. Depth has no colour to test, so it
+        // takes the torso volume and the height cut, which carry the mass.
+        first.traverse((o) => {
+          const d = o.isMesh && o.customDepthMaterial;
+          if (!d) return;
+          const inner = d.onBeforeCompile;
+          d.onBeforeCompile = (shader, r) => {
+            inner(shader, r);
+            const [z0, z1, y0] = cut.torso;
+            shader.vertexShader = shader.vertexShader
+              .replace('#include <common>', '#include <common>\nvarying vec3 vRestPos;')
+              .replace('#include <begin_vertex>', '#include <begin_vertex>\n vRestPos = position;');
+            shader.fragmentShader = shader.fragmentShader
+              .replace('#include <common>', '#include <common>\nvarying vec3 vRestPos;')
+              .replace('void main() {', `void main() {
+                vec3 p = vRestPos;
+                if ((p.z > ${z0.toFixed(3)} && p.z < ${z1.toFixed(3)} && p.y > ${y0.toFixed(3)}) || p.y > 0.2) discard;`);
+          };
+          const key = d.customProgramCacheKey();
+          d.customProgramCacheKey = () => `${key}|norider`;
+        });
+      }
       const midline = (team.gallop.midX ?? 0) * fit;
       const carriers = e.rig.slots.map((slot, i) => {
         const model = i === 0 ? first : first.clone(true);
@@ -2968,13 +3553,23 @@ export function createEntryEngine(canvas, opts = {}) {
           carrier.add(plume.root);
           (e.plumes || (e.plumes = [])).push(plume);
         }
+        if (team.rear) {
+          // The hind hooves, in the carrier's space: the rearing pivot.
+          const g = team.gallop;
+          carrier.userData.pivot = new THREE.Vector3(g.midX ?? 0, g.belly - g.legLength, g.hindHipZ).applyMatrix4(model.matrix);
+          carrier.userData.scale = team.scale ?? 1;
+        }
+        if (team.wings) {
+          const at = new THREE.Vector3(...team.wings.at).applyMatrix4(model.matrix);
+          carrier.userData.wings = attachWings(carrier, at, team.wings.span);
+        }
         slot.add(carrier);
         return carrier;
       });
       // clone(true) does not copy customDepthMaterial; walk both trees together.
       const firstMeshes = [], otherMeshes = [];
       first.traverse((o) => o.isMesh && firstMeshes.push(o));
-      carriers[1].children[0].traverse((o) => o.isMesh && otherMeshes.push(o));
+      carriers[1]?.children[0].traverse((o) => o.isMesh && otherMeshes.push(o));
       otherMeshes.forEach((o, i) => { o.customDepthMaterial = firstMeshes[i]?.customDepthMaterial; });
       e.rig.useTeam(carriers);
       e.teamTime = time;
@@ -3023,7 +3618,9 @@ export function createEntryEngine(canvas, opts = {}) {
       r.pivot.position.set(0, r.cfg.y, 0);
     });
     resize();
+    backdrop.quad.visible = true;
     for (const name of ['photoreal', 'stylised']) { applyLook(name); composer.render(); }
+    backdrop.quad.visible = false;
     saved.forEach(([r, vis, pos]) => { r.rig.root.visible = vis; r.pivot.position.copy(pos); });
     renderer.clear();
   }
@@ -3068,7 +3665,8 @@ export function createEntryEngine(canvas, opts = {}) {
     }
 
     // Fade the ride in and out at the edges instead of popping.
-    const vis = window01(u, 0.07, 0.94);
+    const [fadeIn, fadeOut] = e.cfg.fade || [0.07, 0.94];
+    const vis = window01(u, fadeIn, fadeOut);
     e.rig.root.visible = vis > 0.02;
 
     // Trail is laid along the path already flown, anchored just behind the body.
@@ -3077,7 +3675,7 @@ export function createEntryEngine(canvas, opts = {}) {
 
     // Dust where hooves and wheels meet the ground — more when moving fast.
     if (look.dust && e.cfg.dust && vis > 0.05) {
-      const speed = Math.abs(p.x - (e.lastX ?? p.x)) / Math.max(dt, 1e-3);
+      const speed = Math.abs(p.travel - (e.lastTravel ?? p.travel)) / Math.max(dt, 1e-3);
       const rate = e.cfg.dust.rate * (0.3 + Math.min(speed / 2.5, 1)) * vis;
       e.dustAcc = (e.dustAcc || 0) + rate * dt;
       if (e.dustAcc >= 1) e.pivot.updateMatrixWorld(true);
@@ -3089,13 +3687,48 @@ export function createEntryEngine(canvas, opts = {}) {
         dust.spawn(dustAt, 0.35);
       }
     }
+    // Embers and a hot glow at the hooves.
+    if (e.cfg.embers && vis > 0.05) {
+      e.emberAcc = (e.emberAcc || 0) + e.cfg.embers.rate * vis * dt;
+      if (e.emberAcc >= 1) e.pivot.updateMatrixWorld(true);
+      while (e.emberAcc >= 1) {
+        e.emberAcc -= 1;
+        const pts = e.cfg.embers.points;
+        const [ex, ey, ez] = pts[(Math.random() * pts.length) | 0];
+        e.rig.root.localToWorld(dustAt.set(ex, ey + Math.random() * 0.25, ez));
+        embers.spawn(dustAt, 0.6, 0.3);
+      }
+      const [gx, gy, gz] = e.cfg.embers.glow;
+      e.rig.root.localToWorld(hoofGlow.position.set(gx, gy, gz));
+      hoofGlow.material.opacity = vis * (0.55 + 0.25 * Math.sin(t * 17) * Math.sin(t * 5.3));
+      hoofGlow.visible = true;
+    } else {
+      hoofGlow.visible = false;
+    }
     e.lastX = p.x;
+    e.lastTravel = p.travel;
+    const pxScale = size.h * renderer.getPixelRatio() * camera.projectionMatrix.elements[5] * 0.5;
+    dust.wind = e.cfg.dust?.wind ?? 0;
+    embers.wind = e.cfg.dust?.wind ?? 0;
     dust.update(dt, look.dust ? 1 : 0);
-    dust.uniforms.uScale.value = size.h * renderer.getPixelRatio() * camera.projectionMatrix.elements[5] * 0.5;
+    embers.update(dt, 1);
+    dust.uniforms.uScale.value = pxScale;
+    embers.uniforms.uScale.value = pxScale;
+
+    // Scene card behind the ride.
+    if (backdrop.quad.visible) {
+      backdrop.uniforms.uT.value = t;
+      backdrop.uniforms.uScroll.value = p.travel;
+      backdrop.uniforms.uAspect.value = size.w / Math.max(size.h, 1);
+      backdrop.uniforms.uAlpha.value = 1;
+    }
+    // Rides that arrive, hold and fade take the whole layer down together —
+    // horse, card, dust and all — instead of popping out.
+    if (e.cfg.fadeCanvas) canvas.style.opacity = vis.toFixed(3);
 
     // Lighting and stage react to where the ride is.
     if (shadows) {
-      const [kx, ky, kz] = look.keyOffset;
+      const [kx, ky, kz] = e.cfg.lights?.keyOffset || look.keyOffset;
       key.position.set(p.x + kx, ky, p.z + kz);
       key.target.position.set(p.x, e.cfg.y + p.y, p.z);
       key.target.updateMatrixWorld();
@@ -3156,6 +3789,8 @@ export function createEntryEngine(canvas, opts = {}) {
       cancelAnimationFrame(raf);
       e.rig.root.visible = false;
       e.trail.mesh.visible = false;
+      backdrop.quad.visible = false;
+      canvas.style.opacity = '';
       renderer.clear();
       const cb = onDone; onDone = null; active = null;
       cb?.();
@@ -3182,9 +3817,17 @@ export function createEntryEngine(canvas, opts = {}) {
       e.duration = reduced ? Math.min(duration, 2.2) : duration;
       rigs.forEach((r) => { r.rig.root.visible = false; r.trail.mesh.visible = false; });
       applyLook(e.cfg.photoreal ? 'photoreal' : 'stylised');
-      dust.clear();
-      e.lastX = undefined;
-      e.dustAcc = 0;
+      const L = e.cfg.lights;
+      if (L?.key) { key.color.setHex(L.key[0]); key.intensity = L.key[1]; }
+      if (L?.rim) { rim.color.setHex(L.rim[0]); rim.intensity = L.rim[1]; rim.position.set(...L.rim[2]); }
+      else rim.position.set(6, 2.5, -5);
+      if (L?.sky != null) sky.intensity = L.sky;
+      if (L?.env != null) scene.environmentIntensity = L.env;
+      backdrop.quad.visible = e.cfg.backdrop === 'sunset';
+      canvas.style.opacity = '';
+      dust.clear(); embers.clear();
+      e.lastX = undefined; e.lastTravel = undefined;
+      e.dustAcc = 0; e.emberAcc = 0;
       active = e;
       onDone = done;
       startedAt = lastAt = performance.now();
@@ -3198,6 +3841,8 @@ export function createEntryEngine(canvas, opts = {}) {
       cancelAnimationFrame(raf);
       onDone = null;
       if (active) { active.rig.root.visible = false; active.trail.mesh.visible = false; }
+      backdrop.quad.visible = false;
+      canvas.style.opacity = '';
       active = null;
       renderer.clear();
     },

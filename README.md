@@ -47,8 +47,9 @@ The horse rider and the royal rath render in a second look built for realism;
 the superbike and dragon keep the stylised one. `ENTRIES.<key>.photoreal`
 selects it, and `applyLook()` switches the whole stage when a ride starts:
 
-- **Tone curve.** AgX instead of ACES. ACES pushed the chestnut coat toward
-  salmon pink; AgX rolls highlights off the way a camera does.
+- **Tone curve.** Khronos Neutral instead of ACES. ACES pushed the chestnut
+  coat toward salmon pink, and AgX washed the sunset card out to pastel;
+  Neutral keeps hues true and rolls highlights off gently.
 - **Reflections.** A generated golden-hour studio — deep blue zenith, a warm
   low-sun horizon, three HDR softboxes — replaces the grey room environment for
   these two. Metal is mostly reflection, and this is what turns plaster-grey
@@ -85,8 +86,32 @@ the windows are conforming glass patches over a lit interior with velvet
 curtains. On top: a crown with pearl-strung arches and jewels, and turned urns
 at the corners. Underneath: dished, lacquered spokes (merged into one mesh per
 wheel), gilt felloes, iron tyres, turned naves, a perch, C-springs, and leather
-braces the body actually sways from. Two of the scanned horse trot in the
-shafts — white, crimson plumes, traces running back to the splinter bar.
+braces the body actually sways from.
+
+With `fairy: true` (what the room uses, matching the reference video) the
+coach is gold all over — its panels a deeper, matte chased gold instead of
+crimson — with teal glass in the windows. It is drawn by a single winged horse:
+the scanned horse with its rider cut away in the fragment shader (the cut
+volumes were measured off the mesh: above the saddle between cantle and withers
+everything is rider; along the flank only the grey of the armoured legs is),
+tinted white with a golden mane, tail, saddle and bridle. It rears in the
+traces — the body pitches up about the hind hooves while the forelegs, raised
+and folded, paw the air — under a pair of feathered wings (`buildWing()`:
+primaries, secondaries and two rows of coverts, each a cupped quad with a drawn
+vane, merged into one mesh per wing). The coach rides a luminous bank of white
+and lavender cloud that streams past it, glides in from the right as it fades
+up, holds centre stage, blooms a white flash around the horse, and fades away.
+
+### The sunset card
+
+The horse rider plays inside a full-width golden-hour scene card, as in the
+reference: a low sun with a lens-smeared streak, torn cloud banks lit gold near
+the sun and wine-dark away from it, three ranges of ridged-multifractal
+mountains in aerial haze, and a thin bright line under the ground. It is one
+procedural fragment shader (`SUNSET_FRAG`) on a fullscreen quad drawn first in
+the opaque pass. The ranges scroll at different speeds, so the horse gallops in
+place at centre while the land races past; embers and a hot glow flick off the
+hooves. The whole layer — card, horse and effects — fades out together.
 
 ### First-play stall
 
@@ -101,6 +126,18 @@ after preparing the rides.
 Every wheel — coach and superbike — was spinning backwards. A wheel moving
 toward -x must turn so its top edge also moves toward -x; the angle now grows
 with distance travelled.
+
+Every ride sat in a black box over the room. `UnrealBloomPass` blends its
+result with additive blending, whose alpha term is `srcAlpha * srcAlpha +
+dstAlpha`, and the bloom target's alpha is 1 everywhere — so every transparent
+pixel of the frame came out opaque. Its blend now adds light rather than
+opacity: RGB still adds, and alpha rises only by how bright the bloom is at
+that pixel, which is also what lets a glow spill over the page.
+
+The no-WebGL fallback asked for `assets/dragon.png`, which was never shipped —
+a 404 on every load and a broken fallback. The file is now rendered from the
+engine's own dragon (`node scripts/../mkdragon.mjs` in the working copy), so
+the fallback shows the same dragon the WebGL path does.
 
 ## Sound
 
